@@ -135,7 +135,7 @@ class AiParserService(
     /**
      * 清洗大模型输出中可能存在的 ```json ... ``` 标记，并截取最外层合法 JSON
      */
-    private fun cleanMarkdownJson(raw: String): String {
+    internal fun cleanMarkdownJson(raw: String): String {
         var clean = raw.trim()
         if (clean.startsWith("```json")) {
             clean = clean.removePrefix("```json")
@@ -155,7 +155,7 @@ class AiParserService(
         return clean
     }
 
-    private fun parseDateStringToMillis(dateStr: String?): Long? {
+    internal fun parseDateStringToMillis(dateStr: String?): Long? {
         if (dateStr.isNullOrBlank()) return null
         return try {
             dateTimeFormat.parse(dateStr)?.time
@@ -167,7 +167,7 @@ class AiParserService(
     /**
      * 本地快速规则解析器（离线或模型异常时毫秒级兜底）
      */
-    private fun parseLocally(input: String): List<TaskEntity> {
+    internal fun parseLocally(input: String): List<TaskEntity> {
         val list = mutableListOf<TaskEntity>()
         val parts = input.split(Pattern.compile("[；;，,。\\n]+")).filter { it.isNotBlank() }
 
