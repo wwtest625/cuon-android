@@ -1,0 +1,57 @@
+[
+  {
+    "id": "CASE-01",
+    "category": "职场商务与高频会议",
+    "description": "经典多意图复合输入：同时包含确定时间的日程、带截止时间的待办、以及生活备忘",
+    "input": "下周三下午两点在国贸跟李总聊外贸合同，下周五前把修改草案发他，另外顺便提醒我买两盒咖啡豆",
+    "expected": {
+      "calendar_count": 1,
+      "task_count": 2,
+      "calendar_keywords": ["李总", "外贸", "国贸"],
+      "must_have_deadlines": ["下周五"]
+    }
+  },
+  {
+    "id": "CASE-02",
+    "category": "紧急排期与高优先级",
+    "description": "包含明确的紧急度修饰词（紧急、必须），测试优先级识别",
+    "input": "明天上午十点全员季度例会，紧急：今晚八点前必须提交上周工作周报，顺便把保密协议盖章",
+    "expected": {
+      "calendar_count": 1,
+      "task_count": 2,
+      "high_priority_keywords": ["周报"]
+    }
+  },
+  {
+    "id": "CASE-03",
+    "category": "差旅出行与酒店排期",
+    "description": "异地出行与时间段占用",
+    "input": "后天下午三点去大兴机场接张教授，顺便预定国宾酒店两间大床房，周日晚上八点在老北京烤鸭店聚餐",
+    "expected": {
+      "calendar_count": 2,
+      "task_count": 1,
+      "calendar_keywords": ["大兴机场", "聚餐"]
+    }
+  },
+  {
+    "id": "CASE-04",
+    "category": "生活零碎与无截止时间待办",
+    "description": "纯碎片想法倾倒（无固定日程时间）",
+    "input": "提醒我周末把冬天的厚被子洗了，顺便给猫买包冻干，还有车该去保养了",
+    "expected": {
+      "calendar_count": 0,
+      "task_count": 3,
+      "tags": ["生活", "个人"]
+    }
+  },
+  {
+    "id": "CASE-05",
+    "category": "极端无标点一口气长句压力测试",
+    "description": "语音录入时没有逗号句号的自然连贯口语",
+    "input": "下周一上午九点半在二楼第一会议室开技术架构评审会记得带笔记本还有周五下班前把评审意见汇总好发邮件给架构师",
+    "expected": {
+      "calendar_count": 1,
+      "task_count": 2
+    }
+  }
+]
