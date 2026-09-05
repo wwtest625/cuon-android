@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cuon AI 工作台 - 现代化 UX 原型</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .phone-mockup {
+      width: 412px;
+      height: 860px;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.5), 0 0 0 10px #1e293b, 0 0 0 12px #475569;
+    }
+    .swipe-del-bg {
+      background: linear-gradient(90deg, transparent 60%, rgba(239, 68, 68, 0.2) 100%);
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center py-6 px-4 font-sans antialiased select-none">
+
+  <!-- 顶部标题栏 -->
+  <header class="w-full max-w-5xl mb-6 flex flex-col md:flex-row items-center justify-between gap-4 bg-slate-800/90 backdrop-blur-md p-4 rounded-2xl border border-slate-700/80 shadow-xl">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-500 flex items-center justify-center font-black text-xl text-white shadow-md shadow-emerald-500/30">
+        C
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-lg font-bold tracking-tight text-white">Cuon 个人 AI 待办与日程工作台</h1>
+          <span class="px-2 py-0.5 text-xs rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">2.5 Flash 驱动</span>
+        </div>
+        <p class="text-xs text-slate-400">Jetpack Compose + Material 3 | 左滑删除 · 触感振动 · 相对时间推算</p>
+      </div>
+    </div>
+    <div class="text-xs text-slate-400 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-700/60 flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      <span>API 端点状态：正常 (agnes-2.5-flash)</span>
+    </div>
+  </header>
+
+  <!-- 主体演示区 -->
+  <main class="w-full max-w-5xl flex flex-col lg:flex-row items-start justify-center gap-8">
+    
+    <!-- 模拟 Android 设备 -->
+    <div class="phone-mockup relative bg-slate-950 rounded-[44px] overflow-hidden flex flex-col shrink-0 mx-auto border-4 border-slate-700">
+      
+      <!-- Android 状态栏 -->
+      <div class="h-10 bg-slate-950 text-slate-400 text-xs px-6 flex items-center justify-between shrink-0 z-30">
+        <span class="font-medium text-slate-200">15:05</span>
+        <div class="w-4 h-4 rounded-full bg-slate-900 border border-slate-700 absolute left-1/2 -translate-x-1/2 flex items-center justify-center">
+          <div class="w-2 h-2 rounded-full bg-black"></div>
+        </div>
+        <div class="flex items-center gap-2 text-slate-300">
+          <i class="fa-solid fa-wifi text-[10px]"></i>
+          <i class="fa-solid fa-signal text-[10px]"></i>
+          <span class="text-[11px] font-mono">92%</span>
+        </div>
+      </div>
+
+      <!-- App 内容主体 -->
+      <div class="flex-1 overflow-y-auto no-scrollbar relative bg-slate-900 text-slate-100 flex flex-col p-4 gap-4 pb-28">
+        
+        <!-- 顶部 TopAppBar -->
+        <div class="flex items-center justify-between pt-1">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black text-lg">
+              C
+            </div>
+            <div>
+              <div class="flex items-center gap-1.5">
+                <h2 class="text-base font-bold text-white">Cuon AI 工作台</h2>
+                <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-medium">2.5 Flash</span>
+              </div>
+              <span class="text-xs text-slate-400">待办 3 项 · 日程 2 场</span>
+            </div>
+          </div>
+          <button class="w-8 h-8 rounded-full bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center text-xs">
+            <i class="fa-regular fa-eye"></i>
+          </button>
+        </div>
+
+        <!-- 1. 确定排期日程模块 -->
+        <div class="flex flex-col gap-2">
+          <div class="flex items-center justify-between text-xs font-bold text-emerald-400">
+            <span>📅 确定排期日程 (2)</span>
+            <span class="text-[10px] text-slate-500 font-normal">支持向左滑动手势删除</span>
+          </div>
+
+          <!-- 日程卡片 1 -->
+          <div class="relative overflow-hidden rounded-2xl bg-slate-800/80 border border-emerald-500/30 p-3.5 flex items-center justify-between shadow-sm hover:border-emerald-500/60 transition group">
+            <div class="flex items-center gap-3">
+              <div class="w-1 h-9 rounded-full bg-emerald-500"></div>
+              <div>
+                <h4 class="text-sm font-semibold text-white">与李总商讨外贸产品合同</h4>
+                <div class="flex items-center gap-3 text-xs text-slate-300 mt-1">
+                  <span class="text-emerald-400 font-medium"><i class="fa-regular fa-clock mr-1"></i>下周三 14:00 - 15:30</span>
+                  <span class="text-slate-400"><i class="fa-solid fa-location-dot mr-1"></i>国贸 38F 咖啡厅</span>
+                </div>
+              </div>
+            </div>
+            <span class="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-800">4天后</span>
+          </div>
+
+          <!-- 日程卡片 2 -->
+          <div class="relative overflow-hidden rounded-2xl bg-slate-800/80 border border-slate-700/60 p-3.5 flex items-center justify-between shadow-sm hover:border-slate-600 transition">
+            <div class="flex items-center gap-3">
+              <div class="w-1 h-9 rounded-full bg-blue-500"></div>
+              <div>
+                <h4 class="text-sm font-semibold text-white">全员季度业务复盘会</h4>
+                <div class="flex items-center gap-3 text-xs text-slate-300 mt-1">
+                  <span class="text-blue-400 font-medium"><i class="fa-regular fa-clock mr-1"></i>明天 10:00 - 11:30</span>
+                  <span class="text-slate-400"><i class="fa-solid fa-video mr-1"></i>线上腾讯会议</span>
+                </div>
+              </div>
+            </div>
+            <span class="text-[10px] bg-blue-950 text-blue-300 px-2 py-0.5 rounded-full border border-blue-800">明天</span>
+          </div>
+        </div>
+
+        <!-- 2. 待办行动事项模块 -->
+        <div class="flex flex-col gap-2">
+          <div class="flex items-center justify-between text-xs font-bold text-slate-200">
+            <span>✅ 待办行动事项 (3)</span>
+            <span class="text-[10px] text-slate-400 font-normal">点击勾选 · 震动反馈</span>
+          </div>
+
+          <!-- 待办 1 (高优) -->
+          <div class="rounded-2xl bg-slate-800/90 border border-slate-700/80 p-3 flex items-center justify-between shadow-sm">
+            <div class="flex items-center gap-3">
+              <input type="checkbox" class="w-5 h-5 rounded-lg text-emerald-500 bg-slate-900 border-slate-600 focus:ring-0 cursor-pointer">
+              <div>
+                <span class="text-sm font-medium text-slate-100">向李总发送法务修改后的初版合同</span>
+                <div class="flex items-center gap-2 mt-1">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-red-950/80 text-red-400 border border-red-900/50">截止: 下周五 23:59</span>
+                  <span class="text-[10px] text-slate-400 font-medium">#工作商务</span>
+                </div>
+              </div>
+            </div>
+            <i class="fa-solid fa-flag text-red-400 text-xs mr-1"></i>
+          </div>
+
+          <!-- 待办 2 (带滑动删除示意) -->
+          <div class="relative rounded-2xl bg-slate-800/90 border border-slate-700/80 p-3 flex items-center justify-between shadow-sm swipe-del-bg">
+            <div class="flex items-center gap-3">
+              <input type="checkbox" class="w-5 h-5 rounded-lg text-emerald-500 bg-slate-900 border-slate-600 focus:ring-0 cursor-pointer">
+              <div>
+                <span class="text-sm font-medium text-slate-100">去超市采购两盒深烘咖啡豆</span>
+                <div class="flex items-center gap-2 mt-1">
+                  <span class="text-[10px] text-slate-400 font-medium">#个人生活</span>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-1 text-red-400 text-xs">
+              <i class="fa-solid fa-angles-left animate-pulse"></i>
+              <span class="text-[10px]">左滑删除</span>
+            </div>
+          </div>
+
+          <!-- 待办 3 (已完成示意) -->
+          <div class="rounded-2xl bg-slate-800/40 border border-slate-800 p-3 flex items-center justify-between opacity-50">
+            <div class="flex items-center gap-3">
+              <input type="checkbox" checked class="w-5 h-5 rounded-lg text-emerald-500 bg-slate-900 border-slate-600 focus:ring-0 cursor-pointer">
+              <div>
+                <span class="text-sm font-medium text-slate-400 line-through">预定国宾酒店两间大床房</span>
+                <div class="flex items-center gap-2 mt-1">
+                  <span class="text-[10px] text-slate-500 font-medium">#差旅出行</span>
+                </div>
+              </div>
+            </div>
+            <i class="fa-solid fa-check text-emerald-400 text-xs"></i>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 底部常驻悬浮胶囊 -->
+      <div class="absolute bottom-4 left-3 right-3 flex flex-col gap-2 z-20">
+        
+        <!-- 快速测试芯片 -->
+        <div class="flex items-center gap-2 overflow-x-auto no-scrollbar px-1">
+          <span class="shrink-0 px-2.5 py-1 rounded-full bg-slate-800/90 border border-slate-700 text-[11px] text-emerald-300 font-medium cursor-pointer hover:border-emerald-500 transition">
+            ⚡ 示例: 下周三在国贸开会...
+          </span>
+          <span class="shrink-0 px-2.5 py-1 rounded-full bg-slate-800/90 border border-slate-700 text-[11px] text-slate-300 font-medium cursor-pointer hover:border-emerald-500 transition">
+            ⚡ 示例: 明天上午开季度会...
+          </span>
+        </div>
+
+        <!-- 胶囊输入栏 -->
+        <div class="bg-slate-900/95 backdrop-blur-md border border-slate-700/90 rounded-3xl p-1.5 shadow-2xl flex items-center gap-2">
+          <!-- 麦克风按键 -->
+          <button class="w-11 h-11 rounded-full bg-emerald-500 hover:bg-emerald-400 text-white flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/25 transition">
+            <i class="fa-solid fa-microphone text-base"></i>
+          </button>
+
+          <!-- 输入框 -->
+          <div class="flex-1 text-xs text-slate-400 px-2 truncate">
+            说出或粘贴杂乱事项，2.5 Flash 自动拆解...
+          </div>
+
+          <!-- 发送按钮 -->
+          <button class="w-9 h-9 rounded-full bg-slate-800 text-emerald-400 flex items-center justify-center shrink-0">
+            <i class="fa-solid fa-arrow-up text-sm"></i>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Android 手势导航条 -->
+      <div class="h-4 bg-slate-950 flex items-center justify-center shrink-0 z-30">
+        <div class="w-28 h-1 rounded-full bg-slate-600"></div>
+      </div>
+
+    </div>
+
+    <!-- 右侧现代化 UX 设计说明卡片 -->
+    <div class="flex-1 flex flex-col gap-4 max-w-lg">
+      
+      <div class="bg-slate-800/90 border border-slate-700 rounded-2xl p-5 shadow-lg space-y-3">
+        <h3 class="font-bold text-white text-base flex items-center gap-2">
+          <i class="fa-solid fa-wand-magic-sparkles text-emerald-400"></i> 已落地的现代化 UX 特性
+        </h3>
+        
+        <div class="space-y-2.5 text-xs text-slate-300">
+          <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-700/60">
+            <div class="font-semibold text-emerald-400 mb-1 flex items-center gap-1.5">
+              <i class="fa-solid fa-hand-pointer text-xs"></i> 1. Swipe-to-Dismiss（左滑删除手势）
+            </div>
+            <p class="text-slate-400 leading-relaxed">
+              采用 Material 3 原生 <code>SwipeToDismissBox</code>，卡片支持向左滑动露出圆角红色渐变背景与垃圾桶动效，松手即删，顺滑无阻。
+            </p>
+          </div>
+
+          <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-700/60">
+            <div class="font-semibold text-cyan-400 mb-1 flex items-center gap-1.5">
+              <i class="fa-solid fa-mobile-screen-button text-xs"></i> 2. Haptic Feedback（实体级触觉微震动）
+            </div>
+            <p class="text-slate-400 leading-relaxed">
+              在任务勾选完成、长按麦克风、AI 拆解完成、手势滑动到底时，触发马达的轻柔物理微震，赋予虚拟界面真实的击打反馈感。
+            </p>
+          </div>
+
+          <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-700/60">
+            <div class="font-semibold text-purple-400 mb-1 flex items-center gap-1.5">
+              <i class="fa-solid fa-palette text-xs"></i> 3. Material You 动态色彩系统 (Dynamic Color)
+            </div>
+            <p class="text-slate-400 leading-relaxed">
+              在 Android 12+ 上开启 Monet 引擎，App 主色调、卡片微色标自动提取并融入系统桌面壁纸，沉浸感极强。
+            </p>
+          </div>
+
+          <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-700/60">
+            <div class="font-semibold text-amber-400 mb-1 flex items-center gap-1.5">
+              <i class="fa-solid fa-clock-rotate-left text-xs"></i> 4. 智能相对时间推算 (Smart Relative Time)
+            </div>
+            <p class="text-slate-400 leading-relaxed">
+              不再冷冰冰地展示一串日期时间戳，而是显示“今天 14:00”、“明天上午”、“4天后”，截止逾期自动标红。
+            </p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+</body>
+</html>
