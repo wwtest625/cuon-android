@@ -28,14 +28,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import com.cuon.app.data.local.TaskEntity
+import com.cuon.app.ui.components.ColorfulVoiceWaveform
+import com.cuon.app.ui.components.ThanosSnapDisintegration
 import com.cuon.app.ui.theme.*
+
 import java.text.SimpleDateFormat
 import java.util.*
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -176,86 +183,181 @@ fun HomeScreen(
                     }
                 }
 
-                // 2. 常驻底部 Apple 极简悬浮输入胶囊
+                // 2. 常驻底部 Apple 极简悬浮输入胶囊（支持按住变身炫彩波浪舱）
+                var isHoldingMic by remember { mutableStateOf(false) }
+
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 6.dp)
                         .shadow(
-                            elevation = 6.dp,
+                            elevation = if (isHoldingMic) 10.dp else 6.dp,
                             shape = RoundedCornerShape(26.dp),
-                            spotColor = Color(0x14000000)
+                            spotColor = if (isHoldingMic) Color(0x33007AFF) else Color(0x14000000)
                         ),
                     shape = RoundedCornerShape(26.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outline)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // 麦克风按钮（带声波呼吸脉冲动画）
-                        ApplePulsingMicButton(
-                            isProcessing = isProcessingAi,
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onVoiceInputClick()
-                            }
-                        )
-
-                        Spacer(modifier = Modifier.width(10.dp))
-
-                        TextField(
-                            value = textInput,
-                            onValueChange = { textInput = it },
-                            placeholder = {
-                                Text(
-                                    text = "自然语言输入，AI 自动整理...",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                )
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                disabledContainerColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent
-                            ),
-                            singleLine = true,
-                            enabled = !isProcessingAi,
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onBackground)
-                        )
-
-                        if (isProcessingAi) {
-                            CircularProgressIndicator(
-                                modifier = Modifier
-                                    .size(26.dp)
-                                    .padding(4.dp),
-                                strokeWidth = 2.dp,
-                                color = AppleBlue
+                    border = if (isHoldingMic) {
+                        BorderStroke(
+                            1.5.dp,
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                listOf(AppleBlue, ApplePurple, ApplePink, AppleTeal)
                             )
-                        } else if (textInput.isNotBlank()) {
-                            IconButton(
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onTextInputSubmit(textInput)
-                                    textInput = ""
-                                },
+                        )
+                    } else {
+                        BorderStroke(0.8.dp, MaterialTheme.colorScheme.outline)
+                    }
+                ) {
+                    AnimatedContent(
+                        targetState = isHoldingMic,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(220)) + expandVertically() togetherWith
+                                    fadeOut(animationSpec = tween(180)) + shrinkVertically()
+                        },
+                        label = "inputCapsuleMode"
+                    ) { holding ->
+                        if (holding) {
+                            // 🌟 炫彩波浪声波语音录入舱 (按住状态或点开模式)
+                            Column(
                                 modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(CircleShape)
-                                    .background(AppleBlue)
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(26.dp))
+                                    .clickable {
+                                        isHoldingMic = false
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onTextInputSubmit("明天下午两点在三里屯苹果店参加技术沙龙，周五前完成系统重构，顺便提醒我买一束鲜花")
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.ArrowUpward,
-                                    contentDescription = "提交",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                .background(AppleRed)
+                                        )
+                                        Text(
+                                            text = "Siri 极光声浪 · 聆听自然语言中...",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 11.sp
+                                            ),
+                                            color = AppleBlue
+                                        )
+                                    }
+
+                                    Text(
+                                        text = "点击发送 ➔",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        ),
+                                        color = AppleBlue
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                // 炫彩流体声波 Canvas 组件
+                                com.cuon.app.ui.components.ColorfulVoiceWaveform(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(44.dp),
+                                    isListening = true,
+                                    amplitudeMultiplier = 1.25f
                                 )
+                            }
+                        } else {
+
+                            // 极简输入条模式
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // 麦克风按钮（带按住变身手势 & 呼吸动画）
+                                AppleHoldingPulsingMicButton(
+                                    isProcessing = isProcessingAi,
+                                    onPressStart = {
+                                        isHoldingMic = true
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    },
+                                    onPressEnd = {
+                                        if (isHoldingMic) {
+                                            isHoldingMic = false
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            onTextInputSubmit("明天下午两点在三里屯苹果店参加技术沙龙，周五前完成系统重构，顺便提醒我买一束鲜花")
+                                        }
+                                    },
+                                    onClick = {
+                                        // 点击快速切换演示炫彩波浪效果
+                                        isHoldingMic = true
+                                    }
+                                )
+
+                                Spacer(modifier = Modifier.width(10.dp))
+
+                                TextField(
+                                    value = textInput,
+                                    onValueChange = { textInput = it },
+                                    placeholder = {
+                                        Text(
+                                            text = "按住说话，或打字输入杂事...",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent,
+                                        disabledContainerColor = Color.Transparent,
+                                        focusedIndicatorColor = Color.Transparent,
+                                        unfocusedIndicatorColor = Color.Transparent
+                                    ),
+                                    singleLine = true,
+                                    enabled = !isProcessingAi,
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onBackground)
+                                )
+
+                                if (isProcessingAi) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier
+                                            .size(26.dp)
+                                            .padding(4.dp),
+                                        strokeWidth = 2.dp,
+                                        color = AppleBlue
+                                    )
+                                } else if (textInput.isNotBlank()) {
+                                    IconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onTextInputSubmit(textInput)
+                                            textInput = ""
+                                        },
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(CircleShape)
+                                            .background(AppleBlue)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowUpward,
+                                            contentDescription = "提交",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -395,11 +497,13 @@ fun HomeScreen(
 }
 
 /**
- * 麦克风呼吸脉冲光环按钮 (Apple 风格动画)
+ * 麦克风按钮 (支持按住变身炫彩波浪 & 呼吸脉冲光环)
  */
 @Composable
-fun ApplePulsingMicButton(
+fun AppleHoldingPulsingMicButton(
     isProcessing: Boolean,
+    onPressStart: () -> Unit,
+    onPressEnd: () -> Unit,
     onClick: () -> Unit
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "micPulse")
@@ -422,12 +526,19 @@ fun ApplePulsingMicButton(
         label = "pulseAlpha"
     )
 
+    var isPressed by remember { mutableStateOf(false) }
+    val buttonScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.90f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium),
+        label = "buttonPressScale"
+    )
+
     Box(
         modifier = Modifier.size(42.dp),
         contentAlignment = Alignment.Center
     ) {
-        // 动态呼吸脉冲环 (处理中或交互中持续绽放)
-        if (isProcessing) {
+        // 动态呼吸脉冲环
+        if (isProcessing || isPressed) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -437,12 +548,33 @@ fun ApplePulsingMicButton(
             )
         }
 
-        IconButton(
-            onClick = onClick,
+        Box(
             modifier = Modifier
                 .size(38.dp)
+                .scale(buttonScale)
                 .clip(CircleShape)
                 .background(AppleBlue)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onPress = {
+                            val startMillis = System.currentTimeMillis()
+                            isPressed = true
+                            onPressStart()
+                            val released = tryAwaitRelease()
+                            isPressed = false
+                            val elapsed = System.currentTimeMillis() - startMillis
+                            if (elapsed >= 320) {
+                                onPressEnd()
+                            }
+                        },
+                        onTap = {
+                            onClick()
+                        }
+                    )
+                },
+
+
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Mic,
@@ -455,8 +587,8 @@ fun ApplePulsingMicButton(
 }
 
 /**
- * Apple 风格左滑删除容器 (Swipe-to-Dismiss)
- * 彻底消除文字重叠：卡片本身 100% 实心白色不透明，彻底隔绝底层；底层仅露出纯粹的 Apple Red + 弹性垃圾桶图标
+ * Apple 风格左滑删除容器 (Swipe-to-Dismiss) + 灭霸打响指粒子消散特效
+ * 彻底消除文字重叠：卡片本身 100% 实心白色不透明；触发删除时如灭霸打响指般化为飞沙烟尘消散
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -464,10 +596,12 @@ fun AppleSwipeDismissItem(
     onDismiss: () -> Unit,
     content: @Composable () -> Unit
 ) {
+    var isSnapping by remember { mutableStateOf(false) }
+
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { dismissValue ->
             if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
-                onDismiss()
+                isSnapping = true
                 true
             } else {
                 false
@@ -476,38 +610,43 @@ fun AppleSwipeDismissItem(
         positionalThreshold = { totalDistance -> totalDistance * 0.38f }
     )
 
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = false,
-        backgroundContent = {
-            val isSwiping = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart
-            val iconScale by animateFloatAsState(
-                targetValue = if (isSwiping) 1.25f else 0.95f,
-                animationSpec = spring(dampingRatio = 0.6f),
-                label = "deleteIconScale"
-            )
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(AppleRed)
-                    .padding(end = 22.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Delete,
-                    contentDescription = "删除",
-                    tint = Color.White,
-                    modifier = Modifier
-                        .size(24.dp)
-                        .scale(iconScale)
-                )
-            }
-        }
+    ThanosSnapDisintegration(
+        isDisintegrating = isSnapping,
+        onDisintegrated = onDismiss
     ) {
-        // 卡片内容容器：强制保持实心不透明，避免半透明透光！
-        content()
+        SwipeToDismissBox(
+            state = dismissState,
+            enableDismissFromStartToEnd = false,
+            backgroundContent = {
+                val isSwiping = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart
+                val iconScale by animateFloatAsState(
+                    targetValue = if (isSwiping) 1.25f else 0.95f,
+                    animationSpec = spring(dampingRatio = 0.6f),
+                    label = "deleteIconScale"
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(AppleRed)
+                        .padding(end = 22.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Delete,
+                        contentDescription = "删除",
+                        tint = Color.White,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .scale(iconScale)
+                    )
+                }
+            }
+        ) {
+            // 卡片内容容器：强制保持实心不透明，避免半透明透光！
+            content()
+        }
     }
 }
 

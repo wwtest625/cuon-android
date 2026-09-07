@@ -29,8 +29,16 @@ val AppleDarkTextPrimary = Color(0xFFFFFFFF)
 val AppleDarkTextSecondary = Color(0xFF8E8E93)
 val AppleDarkTextTertiary = Color(0xFF48484A)
 
+val ApplePink = Color(0xFFFF2D55)
+
+// 灭霸响指粒子微光色彩
+val ThanosDustAsh = Color(0xFF8E8E93)
+val ThanosDustGold = Color(0xFFFFD60A)
+val ThanosDustEmber = Color(0xFFFF453A)
+
 // 优先级
 val PriorityHigh = AppleRed
 val PriorityMedium = AppleBlue
 val PriorityLow = AppleGreen
+
 
