@@ -1,6 +1,7 @@
 package com.cuon.app.ui
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -34,12 +35,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.input.pointer.pointerInput
 import com.cuon.app.data.local.TaskEntity
 import com.cuon.app.ui.components.AppleCalendarView
 import com.cuon.app.ui.components.AppleTimeBlockingCalendarView
-import com.cuon.app.ui.components.ColorfulVoiceWaveform
 import com.cuon.app.ui.components.SkeletonGhostCard
 
 import com.cuon.app.ui.components.StreamingTypewriterCard
@@ -49,10 +47,19 @@ import com.cuon.app.ui.theme.*
 
 
 import com.cuon.app.ui.components.AiDraftPreviewBottomSheet
+import com.cuon.app.ui.components.ColorfulVoiceWaveform
 import com.cuon.app.ui.components.TaskEditBottomSheet
-import com.cuon.app.util.SpeechRecognitionManager
+import com.cuon.app.util.XfyunIatManager
 import com.cuon.app.util.openInAmap
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import android.Manifest
+import android.content.pm.PackageManager
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -82,25 +89,91 @@ fun HomeScreen(
     val haptic = LocalHapticFeedback.current
     var showCompletedSection by remember { mutableStateOf(false) }
 
-    // 系统级语音听写（直连厂商识别引擎：荣耀 MagicVoice / 小爱 / 讯飞等，无需谷歌服务）
     val context = LocalContext.current
-    val speechManager = remember { SpeechRecognitionManager(context) }
-    val speechState by speechManager.uiState.collectAsState()
-    var isHoldingMic by remember { mutableStateOf(false) }
+
+    // 讯飞语音听写 (WebAPI 流式):边说边出字,停顿10s或手动停止后送 AI
+    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    val iatManager = remember { XfyunIatManager(context) }
+    var isVoiceListening by remember { mutableStateOf(false) }
+    var voicePartial by remember { mutableStateOf("") }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            iatManager.startListening { mainHandler.post(it) }
+            isVoiceListening = true
+        } else {
+            android.widget.Toast.makeText(context, "未授予麦克风权限，无法语音输入", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
 
     DisposableEffect(Unit) {
-        speechManager.onFinalResult = { spokenText ->
-            isHoldingMic = false
-            if (spokenText != null) {
-                onVoiceResult(spokenText)
-            } else if (speechState.errorMessage.isNotBlank()) {
-                android.widget.Toast.makeText(context, speechState.errorMessage, android.widget.Toast.LENGTH_SHORT).show()
+        iatManager.onPartial = { voicePartial = it }
+        iatManager.onFinal = { text ->
+            isVoiceListening = false
+            voicePartial = ""
+            if (text.isNotBlank()) {
+                onVoiceResult(text)
+            } else {
+                android.widget.Toast.makeText(context, "未检测到语音内容", android.widget.Toast.LENGTH_SHORT).show()
             }
         }
-        onDispose {
-            speechManager.destroy()
-            speechManager.onFinalResult = null
+        iatManager.onError = { msg ->
+            isVoiceListening = false
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
         }
+        onDispose { iatManager.release() }
+    }
+
+    fun toggleVoice() {
+        if (isVoiceListening) {
+            iatManager.stopListening()
+            isVoiceListening = false
+        } else {
+            voicePartial = ""
+            val granted = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                iatManager.startListening { mainHandler.post(it) }
+                isVoiceListening = true
+            } else {
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
+
+    var voiceCancelMode by remember { mutableStateOf(false) } // 手指滑出麦克风,松开即取消
+    var voicePressAt by remember { mutableStateOf(0L) }
+    var isVoiceMode by remember { mutableStateOf(true) }      // 底栏模式:true=语音(大麦克风) false=文字
+
+    val onMicPressStart = {
+        voiceCancelMode = false
+        voicePressAt = System.currentTimeMillis()
+        if (!isVoiceListening) toggleVoice()
+        Unit
+    }
+    val onMicSlideModeChanged = { cancelMode: Boolean ->
+        voiceCancelMode = cancelMode
+        Unit
+    }
+    val onMicPressEnd = { send: Boolean ->
+        if (isVoiceListening) {
+            val tooShort = System.currentTimeMillis() - voicePressAt < 500
+            if (send && !tooShort) {
+                iatManager.stopListening()
+            } else {
+                iatManager.cancelListening()
+                if (tooShort) {
+                    android.widget.Toast.makeText(context, "说话时间太短", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+            isVoiceListening = false
+            voicePartial = ""
+            voiceCancelMode = false
+        }
+        Unit
     }
 
     val calendarEvents = remember(tasks) { tasks.filter { it.isCalendarEvent } }
@@ -284,133 +357,111 @@ fun HomeScreen(
 
                 }
 
-                // 2. 常驻底部 Apple 极简悬浮输入胶囊（支持按住变身炫彩波浪舱）
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                        .shadow(
-                            elevation = if (isHoldingMic) 10.dp else 6.dp,
-                            shape = RoundedCornerShape(26.dp),
-                            spotColor = if (isHoldingMic) Color(0x33007AFF) else Color(0x14000000)
-                        ),
-                    shape = RoundedCornerShape(26.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = if (isHoldingMic) {
-                        BorderStroke(
-                            1.5.dp,
-                            androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                listOf(AppleBlue, ApplePurple, ApplePink, AppleTeal)
-                            )
-                        )
-                    } else {
-                        BorderStroke(0.8.dp, MaterialTheme.colorScheme.outline)
-                    }
-                ) {
-                    AnimatedContent(
-                        targetState = isHoldingMic,
-                        transitionSpec = {
-                            fadeIn(animationSpec = tween(220)) + expandVertically() togetherWith
-                                    fadeOut(animationSpec = tween(180)) + shrinkVertically()
-                        },
-                        label = "inputCapsuleMode"
-                    ) { holding ->
-                        if (holding) {
-                            // 🌟 真实语音聆听舱：按住即录音，松开即识别发送（直连厂商识别引擎）
+                // 2. 常驻底部输入区:语音模式(大麦克风居中)为主 / 文字模式(键盘图标切换)
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // 🎙 聆听面板:按住说话时悬浮在胶囊上方,实时出字
+                    val panelState = remember { MutableTransitionState(false) }
+                    panelState.targetState = isVoiceListening
+                    AnimatedVisibility(visibleState = panelState) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 16.dp, end = 16.dp, bottom = 2.dp),
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outline)
+                        ) {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(26.dp))
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-
-                                horizontalAlignment = Alignment.CenterHorizontally
+                                    .padding(horizontal = 16.dp, vertical = 10.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(AppleRed)
-                                        )
-                                        Text(
-                                            text = speechState.partialText.ifBlank { "正在聆听，请说出您的生活安排…（松开结束）" },
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 11.sp
-                                            ),
-                                            color = AppleBlue,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-
-                                    Text(
-                                        text = "松开发送",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp
-                                        ),
-                                        color = AppleBlue
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(if (voiceCancelMode) MaterialTheme.colorScheme.onSurfaceVariant else AppleRed)
                                     )
+                                    Text(
+                                        text = when {
+                                            voiceCancelMode -> "松开手指，取消发送"
+                                            voicePartial.isNotBlank() -> voicePartial
+                                            else -> "请说话…(松开发送)"
+                                        },
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Medium
+                                        ),
+                                        color = if (voiceCancelMode) MaterialTheme.colorScheme.onSurfaceVariant else AppleBlue,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (!voiceCancelMode) {
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
+                                            onClick = {
+                                                iatManager.cancelListening()
+                                                isVoiceListening = false
+                                                voicePartial = ""
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "取消",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
                                 }
-
                                 Spacer(modifier = Modifier.height(4.dp))
-
-                                // 炫彩流体声波：振幅绑定真实麦克风音量 (RMS)
-                                com.cuon.app.ui.components.ColorfulVoiceWaveform(
+                                ColorfulVoiceWaveform(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(44.dp),
+                                        .height(30.dp),
                                     isListening = true,
-                                    amplitudeMultiplier = (0.3f + speechState.rmsDb / 8f).coerceIn(0.15f, 1.4f)
+                                    amplitudeMultiplier = 0.8f
                                 )
                             }
-                        } else {
+                        }
+                    }
 
-                            // 极简输入条模式
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                            .shadow(
+                                elevation = 6.dp,
+                                shape = RoundedCornerShape(26.dp),
+                                spotColor = Color(0x14000000)
+                            ),
+                        shape = RoundedCornerShape(26.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.outline)
+                    ) {
+                        if (!isVoiceMode) {
+                            // ⌨️ 文字模式
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 8.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // 麦克风按钮：按下立即真实录音，松开立即结束并发送
-                                AppleHoldingPulsingMicButton(
-                                    isProcessing = isProcessingAi,
-                                    onPressStart = {
-                                        isHoldingMic = true
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        speechManager.startListening()
-                                    },
-                                    onPressEnd = {
-                                        if (isHoldingMic) {
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            speechManager.finishListening()
-                                        }
-                                    },
-
-                                    onClick = {
-                                        // 极短按视同"按下-松开"完整周期（onPress/onRelease 已覆盖）
-                                    }
-                                )
-
-                                Spacer(modifier = Modifier.width(10.dp))
-
                                 TextField(
                                     value = textInput,
                                     onValueChange = { textInput = it },
                                     placeholder = {
                                         Text(
-                                            text = "按住说话，或记录生活安排、家庭日程...",
+                                            text = "记录生活安排、家庭日程...",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                         )
@@ -447,13 +498,53 @@ fun HomeScreen(
                                         )
                                     }
                                 } else if (isProcessingAi) {
-                                    // AI 处理中仍保持可输入，仅无文字时展示进度提示（不再全锁交互）
                                     CircularProgressIndicator(
                                         modifier = Modifier
                                             .size(26.dp)
                                             .padding(4.dp),
                                         strokeWidth = 2.dp,
                                         color = AppleBlue
+                                    )
+                                }
+
+                                // 切回语音模式
+                                IconButton(onClick = { isVoiceMode = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Mic,
+                                        contentDescription = "语音输入",
+                                        tint = AppleBlue,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            // 🎙 语音模式:大麦克风居中,键盘图标右下角
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(64.dp)
+                            ) {
+                                AppleHoldingPulsingMicButton(
+                                    modifier = Modifier.align(Alignment.Center),
+                                    buttonSize = 56.dp,
+                                    isProcessing = isProcessingAi,
+                                    isListening = isVoiceListening,
+                                    onPressStart = onMicPressStart,
+                                    onPressEnd = onMicPressEnd,
+                                    onSlideModeChanged = onMicSlideModeChanged
+                                )
+                                IconButton(
+                                    onClick = { isVoiceMode = false },
+                                    modifier = Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .padding(end = 14.dp)
+                                        .size(38.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Keyboard,
+                                        contentDescription = "键盘输入",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
                             }
@@ -757,14 +848,19 @@ fun HomeScreen(
 }
 
 /**
- * 麦克风按钮 (支持按住变身炫彩波浪 & 呼吸脉冲光环)
+ * 麦克风按钮 (呼吸脉冲光环)
+ * 按住开始讯飞语音听写(边说边出字);手指滑出按钮进入取消态,松开即取消;
+ * 在按钮上松开则结束并送 AI。手势宿主常驻组合树,finally 兜底保证松开必收尾。
  */
 @Composable
 fun AppleHoldingPulsingMicButton(
+    modifier: Modifier = Modifier,
+    buttonSize: androidx.compose.ui.unit.Dp = 42.dp,
     isProcessing: Boolean,
+    isListening: Boolean = false,
     onPressStart: () -> Unit,
-    onPressEnd: () -> Unit,
-    onClick: () -> Unit
+    onPressEnd: (send: Boolean) -> Unit,
+    onSlideModeChanged: (cancelMode: Boolean) -> Unit = {}
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "micPulse")
     val pulseScale by infiniteTransition.animateFloat(
@@ -786,19 +882,18 @@ fun AppleHoldingPulsingMicButton(
         label = "pulseAlpha"
     )
 
-    var isPressed by remember { mutableStateOf(false) }
     val buttonScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.90f else 1.0f,
+        targetValue = if (isProcessing) 0.90f else 1.0f,
         animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium),
         label = "buttonPressScale"
     )
 
     Box(
-        modifier = Modifier.size(42.dp),
+        modifier = modifier.size(buttonSize),
         contentAlignment = Alignment.Center
     ) {
         // 动态呼吸脉冲环
-        if (isProcessing || isPressed) {
+        if (isProcessing) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -810,31 +905,44 @@ fun AppleHoldingPulsingMicButton(
 
         Box(
             modifier = Modifier
-                .size(38.dp)
+                .size(buttonSize - 4.dp)
                 .scale(buttonScale)
                 .clip(CircleShape)
-                .background(AppleBlue)
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = {
-                            // 微信式直觉交互：按下立即开始录音，松开立即结束并发送
-                            isPressed = true
-                            onPressStart()
-                            tryAwaitRelease()
-                            isPressed = false
-                            onPressEnd()
+                .background(if (isListening) AppleRed else AppleBlue)
+                .pointerInput(isProcessing) {
+                    if (isProcessing) return@pointerInput
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        onPressStart()
+                        var inside = true
+                        val slop = viewConfiguration.touchSlop.toFloat()
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                if (!change.pressed) break
+                                val pos = change.position
+                                val insideNow = pos.x >= -slop && pos.x <= size.width + slop &&
+                                        pos.y >= -slop && pos.y <= size.height + slop
+                                if (insideNow != inside) {
+                                    inside = insideNow
+                                    onSlideModeChanged(!inside)
+                                }
+                                change.consume()
+                            }
+                        } finally {
+                            onPressEnd(inside)
+                            if (!inside) onSlideModeChanged(false)
                         }
-                    )
+                    }
                 },
-
-
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Default.Mic,
-                contentDescription = "语音输入",
+                imageVector = if (isListening) Icons.Filled.Stop else Icons.Default.Mic,
+                contentDescription = if (isListening) "结束语音输入" else "语音输入",
                 tint = Color.White,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size((buttonSize * 0.45f).coerceAtLeast(18.dp))
             )
         }
     }
