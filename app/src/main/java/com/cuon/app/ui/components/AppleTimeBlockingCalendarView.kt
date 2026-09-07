@@ -6,6 +6,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -33,6 +35,7 @@ import com.cuon.app.ui.AppleSwipeDismissItem
 import com.cuon.app.ui.AppleTaskCard
 import com.cuon.app.ui.theme.AppleBlue
 import com.cuon.app.ui.theme.AppleRed
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -41,11 +44,13 @@ import java.util.*
  * 包含：
  * 1. 纵向 07:00-23:00 小时网格与起止时间块 (Time Blocks)
  * 2. 贪心重叠分列算法 (左右并排，绝不重叠遮挡)
- * 3. 当天 "现在时刻" 红色刻度指示线
+ * 3. 当天 "现在时刻" 红色刻度指示线 (每 30s 动态走动)
  * 4. 进行中日程高亮呼吸边框、过去日程降透明度 (0.52f)
  * 5. 待办截止时间红旗标记 (Deadlines)
- * 6. 轴底部 "今日待安排 / 弹性待办" 折叠收纳区
+ * 6. 轴底部 "今日待安排 / 弹性待办" 折叠收纳区 (无时间待办不遗漏)
+ * 7. 点击/长按时间块弹出 Apple 极简 BottomSheet，提供删除日程与快捷编辑 (解决 P1)
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppleTimeBlockingCalendarView(
     modifier: Modifier = Modifier,
@@ -55,10 +60,13 @@ fun AppleTimeBlockingCalendarView(
     taskGenerations: Map<Long, Int> = emptyMap(),
     onToggleTask: (TaskEntity) -> Unit,
     onDeleteTask: (TaskEntity) -> Unit,
-    onEventClick: (TaskEntity) -> Unit = {}
+    onUpdateTask: (TaskEntity) -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
     val scrollState = rememberScrollState()
+
+    // 选中的日程对象（用于弹出编辑与删除 BottomSheet）
+    var selectedEditingEvent by remember { mutableStateOf<TaskEntity?>(null) }
 
     val dayStartMillis = remember(selectedDate) {
         TimelineLayoutCalculator.getStartOfDayMillis(selectedDate)
@@ -72,16 +80,17 @@ fun AppleTimeBlockingCalendarView(
         }
     }
 
-    // 过滤出属于当天的带截止时间待办与无时间待办
+    // 过滤出属于当天的带截止时间待办
     val dayTodosWithDeadline = remember(pendingTodos, selectedDate) {
         pendingTodos.filter { todo ->
             todo.endTime != null && TimelineLayoutCalculator.isSameDay(todo.endTime, selectedDate)
         }
     }
 
+    // 轴底部折叠区：仅收纳无截止时间的弹性待办，避免与轴上旗标重复
     val floatingTodos = remember(pendingTodos, selectedDate) {
         pendingTodos.filter { todo ->
-            todo.endTime == null || TimelineLayoutCalculator.isSameDay(todo.endTime, selectedDate)
+            todo.endTime == null
         }
     }
 
@@ -101,10 +110,20 @@ fun AppleTimeBlockingCalendarView(
     val hourHeight: Dp = 62.dp
     val totalGridHeight: Dp = hourHeight * totalHours
 
-    // 计算当前分钟数（仅用于“今天”视角的红线）
-    val currentMinuteOfDay = remember(isToday) {
+    // 动态走动的当前分钟数 (P3: 每 30 秒自动推移红线)
+    var currentMinuteOfDay by remember {
         val now = Calendar.getInstance()
-        now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+        mutableStateOf(now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE))
+    }
+
+    LaunchedEffect(isToday) {
+        if (isToday) {
+            while (true) {
+                val now = Calendar.getInstance()
+                currentMinuteOfDay = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+                delay(30000L) // 30秒更新一次
+            }
+        }
     }
 
     // 初始化时若为当天，自动定位到当前时间或 8:00
@@ -200,7 +219,6 @@ fun AppleTimeBlockingCalendarView(
                                     .fillMaxWidth()
                                     .height(hourHeight)
                             ) {
-                                // 时间标签文本
                                 Text(
                                     text = String.format("%02d:00", hour),
                                     style = MaterialTheme.typography.labelSmall.copy(
@@ -213,7 +231,6 @@ fun AppleTimeBlockingCalendarView(
                                         .padding(start = 12.dp, top = 2.dp)
                                 )
 
-                                // 水平整点浅色标尺线
                                 HorizontalDivider(
                                     modifier = Modifier
                                         .padding(start = labelWidth)
@@ -242,7 +259,7 @@ fun AppleTimeBlockingCalendarView(
                             // 状态判定：进行中高亮、过去降透明度
                             val nowMillis = System.currentTimeMillis()
                             val isPast = if (isToday) {
-                                (task.endTime ?: (task.startTime ?: 0L) + 3600000L) < nowMillis
+                                (task.endTime ?: ((task.startTime ?: 0L) + 3600000L)) < nowMillis
                             } else {
                                 selectedDate.before(today)
                             }
@@ -261,8 +278,14 @@ fun AppleTimeBlockingCalendarView(
                                     event = task,
                                     isOngoing = isOngoing,
                                     isPast = isPast,
-                                    onClick = { onEventClick(task) },
-                                    onDelete = { onDeleteTask(task) }
+                                    blockHeight = blockHeight,
+                                    onClick = {
+                                        selectedEditingEvent = task
+                                    },
+                                    onLongClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        selectedEditingEvent = task
+                                    }
                                 )
                             }
                         }
@@ -314,7 +337,6 @@ fun AppleTimeBlockingCalendarView(
                                 .offset(y = currentLineTop - 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // 红点锚点
                             Box(
                                 modifier = Modifier
                                     .padding(start = labelWidth - 4.dp)
@@ -322,7 +344,6 @@ fun AppleTimeBlockingCalendarView(
                                     .clip(CircleShape)
                                     .background(AppleRed)
                             )
-                            // 贯通红线
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
@@ -334,7 +355,7 @@ fun AppleTimeBlockingCalendarView(
                 }
             }
 
-            // 3. 轴底部 "今日待安排 / 弹性待办" 折叠收纳区 (不遗漏任何待办)
+            // 3. 轴底部 "今日待安排 / 弹性待办" 折叠收纳区
             var isFloatingSectionExpanded by remember { mutableStateOf(false) }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -423,23 +444,153 @@ fun AppleTimeBlockingCalendarView(
             }
         }
     }
+
+    // 4. 日程详情与编辑/删除 Apple BottomSheet (解决 P1 交互断层)
+    selectedEditingEvent?.let { event ->
+        var editTitle by remember(event.id) { mutableStateOf(event.title) }
+
+        ModalBottomSheet(
+            onDismissRequest = { selectedEditingEvent = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "日程详情与编辑",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    IconButton(onClick = { selectedEditingEvent = null }) {
+                        Icon(Icons.Outlined.Close, contentDescription = "关闭")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 标题修改输入框
+                OutlinedTextField(
+                    value = editTitle,
+                    onValueChange = { editTitle = it },
+                    label = { Text("事项名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 时间段展示
+                val timeStr = remember(event.startTime, event.endTime) {
+                    val s = if (event.startTime != null) SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(event.startTime)) else ""
+                    val e = if (event.endTime != null) {
+                        val isCross = event.startTime != null && !TimelineLayoutCalculator.isSameDay(
+                            Calendar.getInstance().apply { timeInMillis = event.startTime },
+                            Calendar.getInstance().apply { timeInMillis = event.endTime }
+                        )
+                        if (isCross) "次日 " + SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(event.endTime))
+                        else SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(event.endTime))
+                    } else ""
+                    if (s.isNotBlank() && e.isNotBlank()) "$s - $e" else s
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.AccessTime, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = "起止时间: $timeStr", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                if (event.location.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.LocationOn, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "地点: ${event.location}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // 底部操作按钮栏
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // 红色删除按钮
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onDeleteTask(event)
+                            selectedEditingEvent = null
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppleRed.copy(alpha = 0.12f),
+                            contentColor = AppleRed
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("删除日程", fontWeight = FontWeight.SemiBold)
+                    }
+
+                    // 保存修改按钮
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            if (editTitle.isNotBlank() && editTitle != event.title) {
+                                onUpdateTask(event.copy(title = editTitle.trim()))
+                            }
+                            selectedEditingEvent = null
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppleBlue,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("保存修改", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
 }
 
 /**
  * Apple 风格纵向时间块卡片 (Time Block Card)
  * 实心高对比卡片 + 3.5dp 左侧主题装饰条 + 起止时间与地点
+ * 支持长按与单击弹出 BottomSheet 进行编辑与删除
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppleTimeBlockCard(
     event: TaskEntity,
     isOngoing: Boolean,
     isPast: Boolean,
+    blockHeight: Dp,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onLongClick: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
 
-    // 呼吸动画用于进行中日程
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseAlpha by infiniteTransition.animateFloat(
         initialValue = 0.6f,
@@ -451,9 +602,17 @@ fun AppleTimeBlockCard(
         label = "pulseAlpha"
     )
 
+    // P3: 跨午夜日程标注 "至次日 HH:mm"
     val timeText = remember(event.startTime, event.endTime) {
         val s = if (event.startTime != null) SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(event.startTime)) else ""
-        val e = if (event.endTime != null) SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(event.endTime)) else ""
+        val e = if (event.endTime != null) {
+            val isCross = event.startTime != null && !TimelineLayoutCalculator.isSameDay(
+                Calendar.getInstance().apply { timeInMillis = event.startTime },
+                Calendar.getInstance().apply { timeInMillis = event.endTime }
+            )
+            if (isCross) "至次日 " + SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(event.endTime))
+            else SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(event.endTime))
+        } else ""
         if (s.isNotBlank() && e.isNotBlank()) "$s - $e" else s
     }
 
@@ -467,22 +626,29 @@ fun AppleTimeBlockCard(
         else -> BorderStroke(0.6.dp, MaterialTheme.colorScheme.outline)
     }
 
+    // P3: 矮块保护（高度 < 36.dp 时只显示单行标题，避免挤压截断）
+    val isCompactHeight = blockHeight < 36.dp
+
     Card(
         modifier = Modifier
             .fillMaxSize()
             .alpha(if (isPast) 0.52f else 1.0f)
             .shadow(if (isOngoing) 3.dp else 1.dp, RoundedCornerShape(10.dp), spotColor = Color(0x0F000000))
             .clip(RoundedCornerShape(10.dp))
-            .clickable {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                onClick()
-            },
+            .combinedClickable(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onClick()
+                },
+                onLongClick = {
+                    onLongClick()
+                }
+            ),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = cardBg),
         border = borderStroke
     ) {
         Row(modifier = Modifier.fillMaxSize()) {
-            // 左侧 3.5dp 主题装饰竖条
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
@@ -494,45 +660,43 @@ fun AppleTimeBlockCard(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(horizontal = 8.dp, vertical = if (isCompactHeight) 2.dp else 4.dp),
                 verticalArrangement = Arrangement.Center
             ) {
-                // 第一行：标题 + 超长省略
                 Text(
                     text = event.title,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.sp
+                        fontSize = if (isCompactHeight) 11.sp else 12.sp
                     ),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // 第二行：起止时间 + 地点
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = timeText,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium
-                        ),
-                        color = if (isOngoing) AppleBlue else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    if (event.location.isNotBlank()) {
+                if (!isCompactHeight) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Text(
-                            text = "· ${event.location}",
+                            text = timeText,
                             style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 10.sp
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium
                             ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            color = if (isOngoing) AppleBlue else MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
+                        if (event.location.isNotBlank()) {
+                            Text(
+                                text = "· ${event.location}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }

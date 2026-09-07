@@ -59,6 +59,7 @@ fun HomeScreen(
     taskGenerations: Map<Long, Int> = emptyMap(),
     onToggleTask: (TaskEntity) -> Unit,
     onDeleteTask: (TaskEntity) -> Unit,
+    onUpdateTask: (TaskEntity) -> Unit = {},
     onVoiceInputClick: () -> Unit,
     onTextInputSubmit: (String) -> Unit
 ) {
@@ -439,7 +440,8 @@ fun HomeScreen(
                         pendingTodos = pendingTodos,
                         taskGenerations = taskGenerations,
                         onToggleTask = onToggleTask,
-                        onDeleteTask = onDeleteTask
+                        onDeleteTask = onDeleteTask,
+                        onUpdateTask = onUpdateTask
                     )
                 }
             }

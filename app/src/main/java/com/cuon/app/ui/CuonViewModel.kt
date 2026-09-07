@@ -119,4 +119,14 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
             Toast.makeText(getApplication(), "已撤销删除", Toast.LENGTH_SHORT).show()
         }
     }
+
+    /**
+     * 更新任务或日程内容 (用于编辑标题、时间或地点)
+     */
+    fun updateTask(task: TaskEntity) {
+        viewModelScope.launch {
+            taskDao.updateTask(task)
+            Toast.makeText(getApplication(), "已保存修改", Toast.LENGTH_SHORT).show()
+        }
+    }
 }

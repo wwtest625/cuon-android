@@ -85,6 +85,9 @@ class MainActivity : ComponentActivity() {
                         onDeleteTask = { task ->
                             viewModel.deleteTask(task)
                         },
+                        onUpdateTask = { task ->
+                            viewModel.updateTask(task)
+                        },
                         onVoiceInputClick = {
                             startSpeechToText()
                         },
