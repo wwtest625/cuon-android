@@ -37,6 +37,10 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
     private val _undoMessage = MutableSharedFlow<Pair<String, TaskEntity>>()
     val undoMessage: SharedFlow<Pair<String, TaskEntity>> = _undoMessage.asSharedFlow()
 
+    // 任务代次映射：防止撤销恢复后因 LazyColumn 复用相同 Key 导致滑动删除组件残留红色残影
+    private val _taskGenerations = MutableStateFlow<Map<Long, Int>>(emptyMap())
+    val taskGenerations: StateFlow<Map<Long, Int>> = _taskGenerations.asStateFlow()
+
     /**
      * 处理自然语言输入：在 viewModelScope 中运行，屏幕旋转不中断！
      */
@@ -108,6 +112,8 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
     fun undoDelete() {
         val taskToRestore = lastDeletedTask ?: return
         viewModelScope.launch {
+            val nextGen = (_taskGenerations.value[taskToRestore.id] ?: 0) + 1
+            _taskGenerations.value = _taskGenerations.value + (taskToRestore.id to nextGen)
             taskDao.insertTask(taskToRestore)
             lastDeletedTask = null
             Toast.makeText(getApplication(), "已撤销删除", Toast.LENGTH_SHORT).show()

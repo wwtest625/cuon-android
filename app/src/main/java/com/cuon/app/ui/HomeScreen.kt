@@ -55,6 +55,7 @@ import java.util.*
 fun HomeScreen(
     tasks: List<TaskEntity>,
     isProcessingAi: Boolean,
+    taskGenerations: Map<Long, Int> = emptyMap(),
     onToggleTask: (TaskEntity) -> Unit,
     onDeleteTask: (TaskEntity) -> Unit,
     onVoiceInputClick: () -> Unit,
@@ -466,7 +467,7 @@ fun HomeScreen(
                     }
                 }
 
-                items(displayCalendarEvents, key = { "cal_${it.id}" }) { event ->
+                items(displayCalendarEvents, key = { "cal_${it.id}_${taskGenerations[it.id] ?: 0}" }) { event ->
 
                     AnimatedVisibility(
                         visible = true,
@@ -479,6 +480,8 @@ fun HomeScreen(
                         exit = shrinkVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut()
                     ) {
                         AppleSwipeDismissItem(
+                            itemId = event.id,
+                            generation = taskGenerations[event.id] ?: 0,
                             onDismiss = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onDeleteTask(event)
@@ -524,7 +527,7 @@ fun HomeScreen(
                     AppleEmptyState()
                 }
             } else {
-                items(pendingTodos, key = { "todo_${it.id}" }) { task ->
+                items(pendingTodos, key = { "todo_${it.id}_${taskGenerations[it.id] ?: 0}" }) { task ->
                     AnimatedVisibility(
                         visible = true,
                         enter = fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) +
@@ -536,6 +539,8 @@ fun HomeScreen(
                         exit = shrinkVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut()
                     ) {
                         AppleSwipeDismissItem(
+                            itemId = task.id,
+                            generation = taskGenerations[task.id] ?: 0,
                             onDismiss = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onDeleteTask(task)
@@ -576,13 +581,15 @@ fun HomeScreen(
                         modifier = Modifier.padding(top = 14.dp, bottom = 2.dp, start = 4.dp)
                     )
                 }
-                items(completedTodos, key = { "done_${it.id}" }) { task ->
+                items(completedTodos, key = { "done_${it.id}_${taskGenerations[it.id] ?: 0}" }) { task ->
                     AnimatedVisibility(
                         visible = true,
                         enter = fadeIn() + expandVertically(),
                         exit = shrinkVertically() + fadeOut()
                     ) {
                         AppleSwipeDismissItem(
+                            itemId = task.id,
+                            generation = taskGenerations[task.id] ?: 0,
                             onDismiss = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onDeleteTask(task)
@@ -704,10 +711,12 @@ fun AppleHoldingPulsingMicButton(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppleSwipeDismissItem(
+    itemId: Long = 0L,
+    generation: Int = 0,
     onDismiss: () -> Unit,
     content: @Composable () -> Unit
 ) {
-    var isSnapping by remember { mutableStateOf(false) }
+    var isSnapping by remember(itemId, generation) { mutableStateOf(false) }
 
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { dismissValue ->
@@ -720,6 +729,14 @@ fun AppleSwipeDismissItem(
         },
         positionalThreshold = { totalDistance -> totalDistance * 0.38f }
     )
+
+    // 解决 P1 红色残影：撤销恢复 (generation 变更) 或组件重建时，强制复位滑动状态与消散动效
+    LaunchedEffect(itemId, generation) {
+        isSnapping = false
+        if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+            dismissState.snapTo(SwipeToDismissBoxValue.Settled)
+        }
+    }
 
     ThanosSnapDisintegration(
         isDisintegrating = isSnapping,

@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
             CuonTheme {
                 val tasks by viewModel.tasks.collectAsState()
                 val isProcessing by viewModel.isProcessingAi.collectAsState()
+                val taskGenerations by viewModel.taskGenerations.collectAsState()
                 val snackbarHostState = remember { SnackbarHostState() }
 
                 // 监听删除消息，提供撤销 (Undo) 交互 (解决 P2)
@@ -76,6 +77,7 @@ class MainActivity : ComponentActivity() {
                     HomeScreen(
                         tasks = tasks,
                         isProcessingAi = isProcessing,
+                        taskGenerations = taskGenerations,
                         onToggleTask = { task ->
                             // 延时 380ms 入库，留足前端打勾与划线动画展示时间 (解决 P2)
                             viewModel.toggleTask(task, delayMillis = 380)
