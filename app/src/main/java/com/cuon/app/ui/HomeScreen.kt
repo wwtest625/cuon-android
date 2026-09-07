@@ -37,8 +37,12 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import com.cuon.app.data.local.TaskEntity
 import com.cuon.app.ui.components.ColorfulVoiceWaveform
+import com.cuon.app.ui.components.SkeletonGhostCard
+import com.cuon.app.ui.components.StreamingTypewriterCard
 import com.cuon.app.ui.components.ThanosSnapDisintegration
+
 import com.cuon.app.ui.theme.*
+
 
 import java.text.SimpleDateFormat
 import java.util.*
@@ -61,6 +65,20 @@ fun HomeScreen(
     val calendarEvents = remember(tasks) { tasks.filter { it.isCalendarEvent } }
     val pendingTodos = remember(tasks) { tasks.filter { !it.isCalendarEvent && !it.isCompleted } }
     val completedTodos = remember(tasks) { tasks.filter { !it.isCalendarEvent && it.isCompleted } }
+
+    // 最新入场的新任务支持流式打字机逐字填字
+    val streamingTaskIds = remember { mutableStateListOf<Long>() }
+    var previousTaskIds by remember { mutableStateOf(tasks.map { it.id }.toSet()) }
+
+    LaunchedEffect(tasks) {
+        val currentIds = tasks.map { it.id }.toSet()
+        val newIds = currentIds - previousTaskIds
+        if (newIds.isNotEmpty()) {
+            streamingTaskIds.addAll(newIds)
+        }
+        previousTaskIds = currentIds
+    }
+
 
     val demoPresets = listOf(
         "下周三下午两点在国贸跟李总聊外贸合同，下周五前把修改草案发他，另外顺便提醒我买两盒咖啡豆",
@@ -373,7 +391,7 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // 1. 日程模块
-            if (calendarEvents.isNotEmpty()) {
+            if (calendarEvents.isNotEmpty() || isProcessingAi) {
                 item {
                     Text(
                         text = "排期日程",
@@ -384,6 +402,14 @@ fun HomeScreen(
                         modifier = Modifier.padding(top = 10.dp, bottom = 2.dp, start = 4.dp)
                     )
                 }
+
+                // ⚡ 0 毫秒即时响应：AI 思考排期时的微光流体骨架卡片
+                if (isProcessingAi) {
+                    item(key = "skeleton_cal_card") {
+                        SkeletonGhostCard(isCalendar = true)
+                    }
+                }
+
                 items(calendarEvents, key = { "cal_${it.id}" }) { event ->
                     AnimatedVisibility(
                         visible = true,
@@ -401,7 +427,17 @@ fun HomeScreen(
                                 onDeleteTask(event)
                             }
                         ) {
-                            AppleCalendarCard(event = event)
+                            if (event.id in streamingTaskIds) {
+                                // ✨ 流式打字机逐字填字效果
+                                StreamingTypewriterCard(
+                                    item = event,
+                                    onFinishTyping = {
+                                        streamingTaskIds.remove(event.id)
+                                    }
+                                )
+                            } else {
+                                AppleCalendarCard(event = event)
+                            }
                         }
                     }
                 }
@@ -419,7 +455,14 @@ fun HomeScreen(
                 )
             }
 
-            if (pendingTodos.isEmpty() && calendarEvents.isEmpty()) {
+            // ⚡ 0 毫秒即时响应：AI 待办意图拆解时的微光流体骨架卡片
+            if (isProcessingAi) {
+                item(key = "skeleton_todo_card") {
+                    SkeletonGhostCard(isCalendar = false)
+                }
+            }
+
+            if (pendingTodos.isEmpty() && calendarEvents.isEmpty() && !isProcessingAi) {
                 item {
                     AppleEmptyState()
                 }
@@ -441,17 +484,28 @@ fun HomeScreen(
                                 onDeleteTask(task)
                             }
                         ) {
-                            AppleTaskCard(
-                                task = task,
-                                onToggle = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onToggleTask(task)
-                                }
-                            )
+                            if (task.id in streamingTaskIds) {
+                                // ✨ 流式打字机逐字填字效果
+                                StreamingTypewriterCard(
+                                    item = task,
+                                    onFinishTyping = {
+                                        streamingTaskIds.remove(task.id)
+                                    }
+                                )
+                            } else {
+                                AppleTaskCard(
+                                    task = task,
+                                    onToggle = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onToggleTask(task)
+                                    }
+                                )
+                            }
                         }
                     }
                 }
             }
+
 
             // 3. 已完成任务
             if (completedTodos.isNotEmpty() && showCompletedSection) {
