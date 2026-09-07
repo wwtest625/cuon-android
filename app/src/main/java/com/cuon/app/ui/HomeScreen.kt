@@ -37,6 +37,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import com.cuon.app.data.local.TaskEntity
 import com.cuon.app.ui.components.AppleCalendarView
+import com.cuon.app.ui.components.AppleTimeBlockingCalendarView
 import com.cuon.app.ui.components.ColorfulVoiceWaveform
 import com.cuon.app.ui.components.SkeletonGhostCard
 
@@ -102,9 +103,9 @@ fun HomeScreen(
 
     val demoPresets = listOf(
 
-        "下周三下午两点在国贸跟李总聊外贸合同，下周五前把修改草案发他，另外顺便提醒我买两盒咖啡豆",
-        "明天上午十点全员季度例会，今晚八点前提交上周工作周报，紧急联系法务审查保密协议",
-        "后天下午三点去机场接张教授，预定国宾酒店两间大床房，周日晚上八点聚餐"
+        "下周六上午九点陪爸妈去中心医院体检，周五前记得电话预约挂号，另外买一箱牛奶看望他们",
+        "女儿9月20日下午三点家长会，提前一天准备好要问老师的问题，下周二是结婚纪念日，订个蛋糕买束花",
+        "周三晚上七点半健身房私教课别忘了，这个月内必须缴物业费和车险，周末抽空带狗狗去打疫苗"
     )
 
     Scaffold(
@@ -428,8 +429,23 @@ fun HomeScreen(
                 )
             }
 
-            // 1. 日程模块
-            if (displayCalendarEvents.isNotEmpty() || isProcessingAi || selectedCalendarDate != null) {
+            // 王自如式时间块日历：点击某天无缝展开纵向 07:00-23:00 小时时间轴 (V1)
+            if (selectedCalendarDate != null) {
+                item(key = "time_blocking_timeline_${selectedCalendarDate!!.timeInMillis}") {
+                    AppleTimeBlockingCalendarView(
+                        modifier = Modifier.padding(bottom = 6.dp),
+                        selectedDate = selectedCalendarDate!!,
+                        events = calendarEvents,
+                        pendingTodos = pendingTodos,
+                        taskGenerations = taskGenerations,
+                        onToggleTask = onToggleTask,
+                        onDeleteTask = onDeleteTask
+                    )
+                }
+            }
+
+            // 1. 日程模块（在全部视角或 AI 处理时展示）
+            if (selectedCalendarDate == null && (displayCalendarEvents.isNotEmpty() || isProcessingAi)) {
                 item {
                     Row(
                         modifier = Modifier
@@ -439,24 +455,12 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = if (selectedCalendarDate != null) {
-                                val dateStr = SimpleDateFormat("MM月dd日", Locale.CHINESE).format(selectedCalendarDate!!.time)
-                                "排期日程 ($dateStr)"
-                            } else "排期日程",
+                            text = "排期日程",
                             style = MaterialTheme.typography.titleSmall.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         )
-
-                        if (selectedCalendarDate != null) {
-                            TextButton(
-                                onClick = { selectedCalendarDate = null },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
-                            ) {
-                                Text("查看全部", style = MaterialTheme.typography.labelSmall, color = AppleBlue)
-                            }
-                        }
                     }
                 }
 
@@ -503,31 +507,32 @@ fun HomeScreen(
                 }
             }
 
-            // 2. 待办任务清单
-            item {
-                Text(
-                    text = "待办事项",
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    modifier = Modifier.padding(top = 12.dp, bottom = 2.dp, start = 4.dp)
-                )
-            }
-
-            // ⚡ 0 毫秒即时响应：AI 待办意图拆解时的微光流体骨架卡片
-            if (isProcessingAi) {
-                item(key = "skeleton_todo_card") {
-                    SkeletonGhostCard(isCalendar = false)
-                }
-            }
-
-            if (pendingTodos.isEmpty() && calendarEvents.isEmpty() && !isProcessingAi) {
+            // 2. 待办任务清单（全部视角）
+            if (selectedCalendarDate == null) {
                 item {
-                    AppleEmptyState()
+                    Text(
+                        text = "待办事项",
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.padding(top = 12.dp, bottom = 2.dp, start = 4.dp)
+                    )
                 }
-            } else {
-                items(pendingTodos, key = { "todo_${it.id}_${taskGenerations[it.id] ?: 0}" }) { task ->
+
+                // ⚡ 0 毫秒即时响应：AI 待办意图拆解时的微光流体骨架卡片
+                if (isProcessingAi) {
+                    item(key = "skeleton_todo_card") {
+                        SkeletonGhostCard(isCalendar = false)
+                    }
+                }
+
+                if (pendingTodos.isEmpty() && calendarEvents.isEmpty() && !isProcessingAi) {
+                    item {
+                        AppleEmptyState()
+                    }
+                } else {
+                    items(pendingTodos, key = { "todo_${it.id}_${taskGenerations[it.id] ?: 0}" }) { task ->
                     AnimatedVisibility(
                         visible = true,
                         enter = fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) +
@@ -606,10 +611,11 @@ fun HomeScreen(
                     }
                 }
             }
+        }
 
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
-            }
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+        }
         }
     }
 }
