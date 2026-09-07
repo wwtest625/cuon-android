@@ -203,7 +203,8 @@ fun HomeScreen(
                         Surface(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(16.dp))
-                                .clickable {
+                                .alpha(if (isProcessingAi) 0.45f else 1f)
+                                .clickable(enabled = !isProcessingAi) {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onTextInputSubmit(preset)
                                 },
@@ -219,6 +220,7 @@ fun HomeScreen(
                             )
                         }
                     }
+
                 }
 
                 // 2. 常驻底部 Apple 极简悬浮输入胶囊（支持按住变身炫彩波浪舱）
@@ -875,9 +877,11 @@ fun AppleTaskCard(
     task: TaskEntity,
     onToggle: () -> Unit
 ) {
+    var isCheckedAnim by remember(task.isCompleted) { mutableStateOf(task.isCompleted) }
+
     val animatedAlpha by animateFloatAsState(
-        targetValue = if (task.isCompleted) 0.55f else 1.0f,
-        animationSpec = tween(250),
+        targetValue = if (isCheckedAnim) 0.55f else 1.0f,
+        animationSpec = tween(300),
         label = "cardAlpha"
     )
 
@@ -904,8 +908,11 @@ fun AppleTaskCard(
         ) {
             // Apple 原生风格圆形弹力打勾复选框
             AppleCircleCheckbox(
-                checked = task.isCompleted,
-                onCheckedChange = { onToggle() }
+                checked = isCheckedAnim,
+                onCheckedChange = {
+                    isCheckedAnim = !isCheckedAnim
+                    onToggle()
+                }
             )
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -914,13 +921,14 @@ fun AppleTaskCard(
                 Text(
                     text = task.title,
                     style = MaterialTheme.typography.bodyLarge.copy(
-                        fontWeight = if (task.isCompleted) FontWeight.Normal else FontWeight.Medium,
-                        textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
-                        color = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                        fontWeight = if (isCheckedAnim) FontWeight.Normal else FontWeight.Medium,
+                        textDecoration = if (isCheckedAnim) TextDecoration.LineThrough else TextDecoration.None,
+                        color = if (isCheckedAnim) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
                     ),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
+
 
                 if ((task.endTime != null && !task.isCompleted) || task.tag.isNotBlank()) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -1061,58 +1069,63 @@ fun AppleEmptyState() {
     }
 }
 
+fun getDaysDiffFromToday(targetMillis: Long): Long {
+    val now = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+    val target = Calendar.getInstance().apply {
+        timeInMillis = targetMillis
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+    return (target.timeInMillis - now.timeInMillis) / (24 * 3600 * 1000L)
+}
+
 fun getRelativeBadgeText(startTime: Long?): String {
     if (startTime == null) return ""
-    val now = Calendar.getInstance()
-    val target = Calendar.getInstance().apply { timeInMillis = startTime }
-
-    val diffDays = (target.get(Calendar.DAY_OF_YEAR) - now.get(Calendar.DAY_OF_YEAR))
+    val diffDays = getDaysDiffFromToday(startTime)
     return when {
-        diffDays == 0 -> "今天"
-        diffDays == 1 -> "明天"
-        diffDays == 2 -> "后天"
-        diffDays in 3..7 -> "${diffDays}天后"
-        diffDays > 7 -> "未来"
+        diffDays == 0L -> "今天"
+        diffDays == 1L -> "明天"
+        diffDays == 2L -> "后天"
+        diffDays in 3L..7L -> "${diffDays}天后"
+        diffDays > 7L -> "未来"
+        diffDays == -1L -> "昨天"
+        diffDays < -1L -> "已过去"
         else -> ""
     }
 }
 
 fun formatSmartDateTime(startTime: Long?, endTime: Long?): String {
     if (startTime == null) return "今日待安排"
-    val now = Calendar.getInstance()
-    val target = Calendar.getInstance().apply { timeInMillis = startTime }
-
-    val isSameDay = now.get(Calendar.YEAR) == target.get(Calendar.YEAR) &&
-            now.get(Calendar.DAY_OF_YEAR) == target.get(Calendar.DAY_OF_YEAR)
-
-    val isTomorrow = now.get(Calendar.YEAR) == target.get(Calendar.YEAR) &&
-            now.get(Calendar.DAY_OF_YEAR) + 1 == target.get(Calendar.DAY_OF_YEAR)
+    val diffDays = getDaysDiffFromToday(startTime)
 
     val timeOnly = SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(startTime))
     val endOnly = if (endTime != null) " - " + SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(endTime)) else ""
 
-    return when {
-        isSameDay -> "今天 $timeOnly$endOnly"
-        isTomorrow -> "明天 $timeOnly$endOnly"
+    return when (diffDays) {
+        0L -> "今天 $timeOnly$endOnly"
+        1L -> "明天 $timeOnly$endOnly"
+        2L -> "后天 $timeOnly$endOnly"
         else -> SimpleDateFormat("MM月dd日 EEE HH:mm", Locale.CHINESE).format(Date(startTime)) + endOnly
     }
 }
 
 fun formatSmartDeadline(endTime: Long): String {
-    val now = Calendar.getInstance()
-    val target = Calendar.getInstance().apply { timeInMillis = endTime }
-
-    val isSameDay = now.get(Calendar.YEAR) == target.get(Calendar.YEAR) &&
-            now.get(Calendar.DAY_OF_YEAR) == target.get(Calendar.DAY_OF_YEAR)
-    val isTomorrow = now.get(Calendar.YEAR) == target.get(Calendar.YEAR) &&
-            now.get(Calendar.DAY_OF_YEAR) + 1 == target.get(Calendar.DAY_OF_YEAR)
-
+    val diffDays = getDaysDiffFromToday(endTime)
     val timeOnly = SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(endTime))
 
     return when {
         endTime < System.currentTimeMillis() -> "已逾期"
-        isSameDay -> "今天 $timeOnly 前"
-        isTomorrow -> "明天 $timeOnly 前"
+        diffDays == 0L -> "今天 $timeOnly 前"
+        diffDays == 1L -> "明天 $timeOnly 前"
+        diffDays == 2L -> "后天 $timeOnly 前"
         else -> SimpleDateFormat("MM月dd日 HH:mm", Locale.CHINESE).format(Date(endTime))
     }
 }
+

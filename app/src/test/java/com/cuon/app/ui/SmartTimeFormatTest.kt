@@ -42,4 +42,24 @@ class SmartTimeFormatTest {
         val result = formatSmartDeadline(pastTime)
         assertEquals("已逾期", result)
     }
+
+    @Test
+    fun testGetDaysDiffFromToday_yearBoundary() {
+        // 验证跨年自然日毫秒差算法
+        val endOfYear = Calendar.getInstance().apply {
+            set(2026, Calendar.DECEMBER, 31, 23, 59, 0)
+        }
+        val startOfNextYear = Calendar.getInstance().apply {
+            set(2027, Calendar.JANUARY, 1, 0, 1, 0)
+        }
+        val endOfYearZero = (endOfYear.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        val startOfNextYearZero = (startOfNextYear.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        val diffDays = (startOfNextYearZero.timeInMillis - endOfYearZero.timeInMillis) / (24 * 3600 * 1000L)
+        assertEquals("跨年12月31日到次年1月1日相隔应恰好为1天", 1L, diffDays)
+    }
 }
+

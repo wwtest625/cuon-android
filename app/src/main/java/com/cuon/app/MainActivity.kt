@@ -8,32 +8,18 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.Surface
+import androidx.activity.viewModels
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.lifecycle.lifecycleScope
-import com.cuon.app.data.local.AppDatabase
-import com.cuon.app.data.local.TaskEntity
-import com.cuon.app.data.remote.AiParserService
+import com.cuon.app.ui.CuonViewModel
 import com.cuon.app.ui.HomeScreen
 import com.cuon.app.ui.theme.CuonTheme
-import kotlinx.coroutines.launch
 import java.util.*
 
 class MainActivity : ComponentActivity() {
 
-    private val db by lazy { AppDatabase.getDatabase(this) }
-    private val taskDao by lazy { db.taskDao() }
-    
-    // 从 BuildConfig 安全读取配置（敏感 Key 受 local.properties 保护，不进版本库）
-    private val aiService by lazy {
-        AiParserService(
-            apiKey = BuildConfig.AI_API_KEY,
-            apiBaseUrl = BuildConfig.AI_BASE_URL,
-            modelName = BuildConfig.AI_MODEL
-        )
-    }
-
-    private var isProcessingAiState = mutableStateOf(false)
+    // 使用 ViewModel 管理状态，屏幕旋转生命周期持久化 (解决 P0)
+    private val viewModel by viewModels<CuonViewModel>()
 
     // 原生语音识别启动器
     private val speechRecognizerLauncher = registerForActivityResult(
@@ -45,7 +31,9 @@ class MainActivity : ComponentActivity() {
                 ?.firstOrNull()
 
             if (!spokenText.isNullOrBlank()) {
-                processAndSaveInput(spokenText)
+                viewModel.processAndSaveInput(spokenText)
+            } else {
+                Toast.makeText(this, "未检测到语音内容", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -55,29 +43,54 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             CuonTheme {
-                val tasks by taskDao.getAllTasksFlow().collectAsState(initial = emptyList())
-                val isProcessing by isProcessingAiState
+                val tasks by viewModel.tasks.collectAsState()
+                val isProcessing by viewModel.isProcessingAi.collectAsState()
+                val snackbarHostState = remember { SnackbarHostState() }
 
-                HomeScreen(
-                    tasks = tasks,
-                    isProcessingAi = isProcessing,
-                    onToggleTask = { task ->
-                        lifecycleScope.launch {
-                            taskDao.updateTask(task.copy(isCompleted = !task.isCompleted))
+                // 监听删除消息，提供撤销 (Undo) 交互 (解决 P2)
+                LaunchedEffect(Unit) {
+                    viewModel.undoMessage.collect { (msg, _) ->
+                        val result = snackbarHostState.showSnackbar(
+                            message = msg,
+                            actionLabel = "撤销",
+                            duration = SnackbarDuration.Short
+                        )
+                        if (result == SnackbarResult.ActionPerformed) {
+                            viewModel.undoDelete()
                         }
-                    },
-                    onDeleteTask = { task ->
-                        lifecycleScope.launch {
-                            taskDao.deleteTask(task)
-                        }
-                    },
-                    onVoiceInputClick = {
-                        startSpeechToText()
-                    },
-                    onTextInputSubmit = { text ->
-                        processAndSaveInput(text)
                     }
-                )
+                }
+
+                Scaffold(
+                    snackbarHost = {
+                        SnackbarHost(hostState = snackbarHostState) { data ->
+                            Snackbar(
+                                snackbarData = data,
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurface,
+                                actionColor = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                ) { padding ->
+                    HomeScreen(
+                        tasks = tasks,
+                        isProcessingAi = isProcessing,
+                        onToggleTask = { task ->
+                            // 延时 380ms 入库，留足前端打勾与划线动画展示时间 (解决 P2)
+                            viewModel.toggleTask(task, delayMillis = 380)
+                        },
+                        onDeleteTask = { task ->
+                            viewModel.deleteTask(task)
+                        },
+                        onVoiceInputClick = {
+                            startSpeechToText()
+                        },
+                        onTextInputSubmit = { text ->
+                            viewModel.processAndSaveInput(text)
+                        }
+                    )
+                }
             }
         }
     }
@@ -92,36 +105,6 @@ class MainActivity : ComponentActivity() {
             speechRecognizerLauncher.launch(intent)
         } catch (e: Exception) {
             Toast.makeText(this, "未检测到系统语音服务，可点击下方示例或直接输入", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun processAndSaveInput(rawText: String) {
-        val trimmed = rawText.trim()
-        if (trimmed.isBlank()) {
-            Toast.makeText(this, "未检测到输入内容，请说出或输入事项", Toast.LENGTH_SHORT).show()
-            return
-        }
-        isProcessingAiState.value = true
-        lifecycleScope.launch {
-            try {
-                val parsedItems = aiService.parseTextToTasks(trimmed)
-
-                if (parsedItems.isNotEmpty()) {
-                    taskDao.insertTasks(parsedItems)
-                    val calCount = parsedItems.count { it.isCalendarEvent }
-                    val todoCount = parsedItems.size - calCount
-                    Toast.makeText(
-                        this@MainActivity,
-                        "AI 拆解就绪：已安排 $calCount 场日程，$todoCount 项待办",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "网络超时，已存入普通待办", Toast.LENGTH_SHORT).show()
-                taskDao.insertTask(TaskEntity(title = rawText))
-            } finally {
-                isProcessingAiState.value = false
-            }
         }
     }
 }

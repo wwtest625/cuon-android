@@ -29,10 +29,11 @@ data class AiResponseSchema(
 )
 
 class AiParserService(
-    private val apiKey: String = "sk-fm2UIcm8dhC5eKnbSMZpuhQcuqWaTZk59uaObkMXNww4hBwh",
+    private val apiKey: String,
     private val apiBaseUrl: String = "https://apihub.agnes-ai.cn/v1",
     private val modelName: String = "agnes-2.5-flash"
 ) {
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
