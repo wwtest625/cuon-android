@@ -20,5 +20,6 @@ data class TaskEntity(
     val priority: String = "medium",    // high, medium, low
     val tag: String = "默认",
     val location: String = "",
+    val reminderMinutesBefore: Int? = null, // null=不提醒, 0=准时, 15=提前15分钟, 30=提前30分钟
     val createdAt: Long = System.currentTimeMillis()
 )

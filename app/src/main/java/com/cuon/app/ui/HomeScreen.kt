@@ -47,9 +47,10 @@ import com.cuon.app.ui.components.ThanosSnapDisintegration
 import com.cuon.app.ui.theme.*
 
 
+import com.cuon.app.ui.components.AiDraftPreviewBottomSheet
+import com.cuon.app.ui.components.TaskEditBottomSheet
 import java.text.SimpleDateFormat
 import java.util.*
-
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,9 +58,19 @@ fun HomeScreen(
     tasks: List<TaskEntity>,
     isProcessingAi: Boolean,
     taskGenerations: Map<Long, Int> = emptyMap(),
+    draftTasks: List<TaskEntity>? = null,
+    editingTask: TaskEntity? = null,
+    initialSelectedDate: Long? = null,
     onToggleTask: (TaskEntity) -> Unit,
     onDeleteTask: (TaskEntity) -> Unit,
     onUpdateTask: (TaskEntity) -> Unit = {},
+    onEditTask: (TaskEntity) -> Unit = {},
+    onCloseTaskEditor: () -> Unit = {},
+    onSaveEditedTask: (TaskEntity) -> Unit = {},
+    onDismissDraft: () -> Unit = {},
+    onConfirmDraft: (List<TaskEntity>) -> Unit = {},
+    onUpdateDraftItem: (Int, TaskEntity) -> Unit = { _, _ -> },
+    onRemoveDraftItem: (Int) -> Unit = {},
     onVoiceInputClick: () -> Unit,
     onTextInputSubmit: (String) -> Unit
 ) {
@@ -72,6 +83,13 @@ fun HomeScreen(
     val completedTodos = remember(tasks) { tasks.filter { !it.isCalendarEvent && it.isCompleted } }
 
     var selectedCalendarDate by remember { mutableStateOf<Calendar?>(null) }
+
+    // 处理深链跳转指定日期
+    LaunchedEffect(initialSelectedDate) {
+        if (initialSelectedDate != null && initialSelectedDate > 0) {
+            selectedCalendarDate = Calendar.getInstance().apply { timeInMillis = initialSelectedDate }
+        }
+    }
 
     val displayCalendarEvents = remember(calendarEvents, selectedCalendarDate) {
         val target = selectedCalendarDate
@@ -139,19 +157,19 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = "Cuon 工作台",
+                                    text = "Cuon 生活事项",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                                     color = MaterialTheme.colorScheme.onBackground
                                 )
                                 Surface(
                                     shape = RoundedCornerShape(10.dp),
-                                    color = AppleBlue.copy(alpha = 0.12f),
-                                    border = BorderStroke(0.5.dp, AppleBlue.copy(alpha = 0.25f))
+                                    color = AppleBlue.copy(alpha = 0.08f),
+                                    border = BorderStroke(0.5.dp, AppleBlue.copy(alpha = 0.2f))
                                 ) {
                                     Text(
-                                        text = "2.5 Flash",
+                                        text = "智能守护",
                                         style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = FontWeight.SemiBold,
+                                            fontWeight = FontWeight.Medium,
                                             fontSize = 10.sp
                                         ),
                                         color = AppleBlue,
@@ -357,7 +375,7 @@ fun HomeScreen(
                                     onValueChange = { textInput = it },
                                     placeholder = {
                                         Text(
-                                            text = "按住说话，或打字输入杂事...",
+                                            text = "按住说话，或记录生活安排、家庭日程...",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                         )
@@ -441,7 +459,8 @@ fun HomeScreen(
                         taskGenerations = taskGenerations,
                         onToggleTask = onToggleTask,
                         onDeleteTask = onDeleteTask,
-                        onUpdateTask = onUpdateTask
+                        onUpdateTask = onUpdateTask,
+                        onEditTask = onEditTask
                     )
                 }
             }
@@ -502,7 +521,10 @@ fun HomeScreen(
                                     }
                                 )
                             } else {
-                                AppleCalendarCard(event = event)
+                                AppleCalendarCard(
+                                    event = event,
+                                    onClick = { onEditTask(event) }
+                                )
                             }
                         }
                     }
@@ -513,7 +535,7 @@ fun HomeScreen(
             if (selectedCalendarDate == null) {
                 item {
                     Text(
-                        text = "待办事项",
+                        text = "生活待办",
                         style = MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -567,7 +589,8 @@ fun HomeScreen(
                                     onToggle = {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         onToggleTask(task)
-                                    }
+                                    },
+                                    onClick = { onEditTask(task) }
                                 )
                             }
                         }
@@ -607,7 +630,8 @@ fun HomeScreen(
                                 onToggle = {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onToggleTask(task)
-                                }
+                                },
+                                onClick = { onEditTask(task) }
                             )
                         }
                     }
@@ -618,7 +642,39 @@ fun HomeScreen(
         item {
             Spacer(modifier = Modifier.height(16.dp))
         }
-        }
+    }
+
+    // AI 拆解预览确认 BottomSheet (方案 A：核对纠错后再批量入库)
+    draftTasks?.let { drafts ->
+        AiDraftPreviewBottomSheet(
+            draftItems = drafts,
+            onDismiss = onDismissDraft,
+            onConfirmAll = { confirmedList ->
+                onConfirmDraft(confirmedList)
+            },
+            onItemUpdate = { index, updated ->
+                onUpdateDraftItem(index, updated)
+            },
+            onItemRemove = { index ->
+                onRemoveDraftItem(index)
+            }
+        )
+    }
+
+    // 全局通用任务/日程编辑 BottomSheet
+    editingTask?.let { task ->
+        TaskEditBottomSheet(
+            task = task,
+            onDismiss = onCloseTaskEditor,
+            onSave = { updated ->
+                onSaveEditedTask(updated)
+            },
+            onDelete = {
+                onDeleteTask(it)
+                onCloseTaskEditor()
+            }
+        )
+    }
     }
 }
 
@@ -791,10 +847,14 @@ fun AppleSwipeDismissItem(
  * 实心背景 + 0.6dp 极细轮廓边框 + 清晰时间与右侧胶囊，绝无文字重叠！
  */
 @Composable
-fun AppleCalendarCard(event: TaskEntity) {
+fun AppleCalendarCard(
+    event: TaskEntity,
+    onClick: () -> Unit = {}
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onClick() }
             .shadow(
                 elevation = 1.dp,
                 shape = RoundedCornerShape(16.dp),
@@ -900,7 +960,8 @@ fun AppleCalendarCard(event: TaskEntity) {
 @Composable
 fun AppleTaskCard(
     task: TaskEntity,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    onClick: () -> Unit = {}
 ) {
     var isCheckedAnim by remember(task.isCompleted) { mutableStateOf(task.isCompleted) }
 
@@ -914,6 +975,7 @@ fun AppleTaskCard(
         modifier = Modifier
             .fillMaxWidth()
             .alpha(animatedAlpha)
+            .clickable { onClick() }
             .shadow(
                 elevation = 1.dp,
                 shape = RoundedCornerShape(16.dp),
@@ -987,6 +1049,24 @@ fun AppleTaskCard(
                                 ),
                                 color = AppleBlue
                             )
+                        }
+                        if (task.reminderMinutesBefore != null && !task.isCompleted) {
+                            val reminderLabel = if (task.reminderMinutesBefore == 0) "准时" else "提前${task.reminderMinutesBefore}分"
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF34C759).copy(alpha = 0.08f),
+                                border = BorderStroke(0.5.dp, Color(0xFF34C759).copy(alpha = 0.2f))
+                            ) {
+                                Text(
+                                    text = "🔔 $reminderLabel",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium
+                                    ),
+                                    color = Color(0xFF34C759),
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1080,13 +1160,13 @@ fun AppleEmptyState() {
             }
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "全部事项已达成",
+                text = "今日生活安排已就绪",
                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "点击下方快速示例，或随时说话倾倒事项",
+                text = "暂无待办事项，尽情享受轻松惬意的当下时光",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

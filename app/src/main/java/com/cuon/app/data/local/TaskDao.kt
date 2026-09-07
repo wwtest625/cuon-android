@@ -17,6 +17,12 @@ interface TaskDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTasks(tasks: List<TaskEntity>)
 
+    @Query("SELECT * FROM tasks WHERE isCompleted = 0 AND reminderMinutesBefore IS NOT NULL")
+    suspend fun getActiveTasksWithReminder(): List<TaskEntity>
+
+    @Query("SELECT * FROM tasks WHERE id = :id")
+    suspend fun getTaskById(id: Long): TaskEntity?
+
     @Update
     suspend fun updateTask(task: TaskEntity)
 

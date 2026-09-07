@@ -60,7 +60,8 @@ fun AppleTimeBlockingCalendarView(
     taskGenerations: Map<Long, Int> = emptyMap(),
     onToggleTask: (TaskEntity) -> Unit,
     onDeleteTask: (TaskEntity) -> Unit,
-    onUpdateTask: (TaskEntity) -> Unit = {}
+    onUpdateTask: (TaskEntity) -> Unit = {},
+    onEditTask: (TaskEntity) -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
     val scrollState = rememberScrollState()
@@ -445,132 +446,20 @@ fun AppleTimeBlockingCalendarView(
         }
     }
 
-    // 4. 日程详情与编辑/删除 Apple BottomSheet (解决 P1 交互断层)
+    // 4. 日程详情与编辑/删除 Apple BottomSheet (统一使用 TaskEditBottomSheet)
     selectedEditingEvent?.let { event ->
-        var editTitle by remember(event.id) { mutableStateOf(event.title) }
-
-        ModalBottomSheet(
-            onDismissRequest = { selectedEditingEvent = null },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "日程详情与编辑",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    IconButton(onClick = { selectedEditingEvent = null }) {
-                        Icon(Icons.Outlined.Close, contentDescription = "关闭")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // 标题修改输入框
-                OutlinedTextField(
-                    value = editTitle,
-                    onValueChange = { editTitle = it },
-                    label = { Text("事项名称") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // 时间段展示
-                val timeStr = remember(event.startTime, event.endTime) {
-                    val s = if (event.startTime != null) SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(event.startTime)) else ""
-                    val e = if (event.endTime != null) {
-                        val isCross = event.startTime != null && !TimelineLayoutCalculator.isSameDay(
-                            Calendar.getInstance().apply { timeInMillis = event.startTime },
-                            Calendar.getInstance().apply { timeInMillis = event.endTime }
-                        )
-                        if (isCross) "次日 " + SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(event.endTime))
-                        else SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(event.endTime))
-                    } else ""
-                    if (s.isNotBlank() && e.isNotBlank()) "$s - $e" else s
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.AccessTime, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "起止时间: $timeStr", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-
-                if (event.location.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.LocationOn, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(text = "地点: ${event.location}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // 底部操作按钮栏
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // 红色删除按钮
-                    Button(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onDeleteTask(event)
-                            selectedEditingEvent = null
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AppleRed.copy(alpha = 0.12f),
-                            contentColor = AppleRed
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("删除日程", fontWeight = FontWeight.SemiBold)
-                    }
-
-                    // 保存修改按钮
-                    Button(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            if (editTitle.isNotBlank() && editTitle != event.title) {
-                                onUpdateTask(event.copy(title = editTitle.trim()))
-                            }
-                            selectedEditingEvent = null
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AppleBlue,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("保存修改", fontWeight = FontWeight.SemiBold)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
+        TaskEditBottomSheet(
+            task = event,
+            onDismiss = { selectedEditingEvent = null },
+            onSave = { updated ->
+                onUpdateTask(updated)
+                selectedEditingEvent = null
+            },
+            onDelete = {
+                onDeleteTask(it)
+                selectedEditingEvent = null
             }
-        }
+        )
     }
 }
 

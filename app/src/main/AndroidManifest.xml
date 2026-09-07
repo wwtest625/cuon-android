@@ -4,10 +4,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
-
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@android:drawable/ic_dialog_info"
         android:label="@string/app_name"
         android:roundIcon="@android:drawable/ic_dialog_info"
@@ -22,6 +24,25 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 定时提醒广播接收器 -->
+        <receiver
+            android:name=".reminder.AlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.cuon.app.ACTION_TASK_REMINDER" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 开机与应用升级后重排闹钟接收器 -->
+        <receiver
+            android:name=".reminder.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
