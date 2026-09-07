@@ -185,8 +185,8 @@ fun AppleCalendarView(
                             dayCal.get(Calendar.YEAR) == selectedDate.get(Calendar.YEAR) &&
                             dayCal.get(Calendar.DAY_OF_YEAR) == selectedDate.get(Calendar.DAY_OF_YEAR)
 
-                    // 检查这一天是否有日程安排
-                    val hasEvents = events.any { event ->
+                    // 统计这一天有多少条日程(密度可视化用)
+                    val dayEventCount = events.count { event ->
                         if (event.startTime == null) false
                         else {
                             val eventCal = Calendar.getInstance().apply { timeInMillis = event.startTime }
@@ -194,6 +194,11 @@ fun AppleCalendarView(
                                     dayCal.get(Calendar.DAY_OF_YEAR) == eventCal.get(Calendar.DAY_OF_YEAR)
                         }
                     }
+
+                    // 过去的日期降低视觉权重,突出"现在"
+                    val isPastDay = dayCal.get(Calendar.YEAR) < today.get(Calendar.YEAR) ||
+                            (dayCal.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+                                    dayCal.get(Calendar.DAY_OF_YEAR) < today.get(Calendar.DAY_OF_YEAR))
 
                     Column(
                         modifier = Modifier
@@ -210,11 +215,12 @@ fun AppleCalendarView(
                             .padding(vertical = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // 星期名
+                        // 星期名(过去的日子淡化)
                         Text(
                             text = weekDayNames[index],
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (isPastDay) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                            else MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
                         Spacer(modifier = Modifier.height(4.dp))
@@ -242,6 +248,7 @@ fun AppleCalendarView(
                                 color = when {
                                     isToday -> Color.White
                                     isSelected -> AppleBlue
+                                    isPastDay -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                                     else -> MaterialTheme.colorScheme.onSurface
                                 }
                             )
@@ -249,13 +256,37 @@ fun AppleCalendarView(
 
                         Spacer(modifier = Modifier.height(3.dp))
 
-                        // 日程指示微圆点 (Apple Blue Event Dot)
-                        Box(
-                            modifier = Modifier
-                                .size(4.dp)
-                                .clip(CircleShape)
-                                .background(if (hasEvents) AppleBlue else Color.Transparent)
-                        )
+                        // 日程密度指示:1-3 条逐点呈现,4 条以上直接显示数字 (Apple Blue)
+                        if (dayEventCount > 3) {
+                            Text(
+                                text = "$dayEventCount",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = AppleBlue
+                            )
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                repeat(dayEventCount) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(4.dp)
+                                            .clip(CircleShape)
+                                            .background(AppleBlue)
+                                    )
+                                }
+                                if (dayEventCount == 0) {
+                                    // 占位保持行高一致
+                                    Box(
+                                        modifier = Modifier
+                                            .size(4.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.Transparent)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

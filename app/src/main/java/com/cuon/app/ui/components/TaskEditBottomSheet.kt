@@ -18,9 +18,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cuon.app.data.local.TaskEntity
+import com.cuon.app.data.remote.AmapPoiService
+import com.cuon.app.util.openInAmap
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -41,6 +47,33 @@ fun TaskEditBottomSheet(
     var selectedTag by remember(task.id) { mutableStateOf(task.tag.ifBlank { "家庭" }) }
     var reminderMinutes by remember(task.id) { mutableStateOf(task.reminderMinutesBefore) }
     var isHighPriority by remember(task.id) { mutableStateOf(task.priority.equals("high", ignoreCase = true)) }
+
+    // 地点内联联想：用户实际输入时防抖搜索高德 POI，下拉点选回填
+    // (不用 snapshotFlow:打开面板时 editLocation 带有存量值,会误触发自动弹出)
+    val context = LocalContext.current
+    val poiService = remember { AmapPoiService() }
+    val scope = rememberCoroutineScope()
+    var locationSuggestions by remember { mutableStateOf<List<AmapPoiService.PoiResult>>(emptyList()) }
+    var showSuggestions by remember { mutableStateOf(false) }
+    var locationSearchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    fun onLocationInput(input: String) {
+        locationSearchJob?.cancel()
+        if (input.isBlank()) {
+            locationSuggestions = emptyList()
+            showSuggestions = false
+            return
+        }
+        showSuggestions = true
+        locationSearchJob = scope.launch {
+            delay(350) // debounce：连输只发最后一次
+            locationSuggestions = try {
+                poiService.searchPois(input)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -151,23 +184,87 @@ fun TaskEditBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 地点输入框
-            OutlinedTextField(
-                value = editLocation,
-                onValueChange = { editLocation = it },
-                label = { Text("地点 (选填)") },
-                placeholder = { Text("例如：市儿童医院门诊大厅") },
-                singleLine = true,
-                leadingIcon = {
-                    Icon(Icons.Outlined.LocationOn, contentDescription = null, tint = AppleBlue)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AppleBlue,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+            // 地点输入框：单框内联联想 + 高德快捷跳转
+            Box {
+                OutlinedTextField(
+                    value = editLocation,
+                    onValueChange = {
+                        editLocation = it
+                        onLocationInput(it)
+                    },
+                    label = { Text("地点 (选填)") },
+                    placeholder = { Text("输入关键词搜索地址") },
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(Icons.Outlined.LocationOn, contentDescription = null, tint = AppleBlue)
+                    },
+                    trailingIcon = {
+                        if (editLocation.isNotBlank()) {
+                            IconButton(onClick = { openInAmap(context, editLocation) }) {
+                                Icon(
+                                    Icons.Outlined.Navigation,
+                                    contentDescription = "在高德地图打开",
+                                    tint = AppleBlue
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AppleBlue,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                    )
                 )
-            )
+
+                // POI 联想下拉
+                DropdownMenu(
+                    expanded = showSuggestions && locationSuggestions.isNotEmpty(),
+                    onDismissRequest = { showSuggestions = false },
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .heightIn(max = 280.dp)
+                ) {
+                    locationSuggestions.take(6).forEach { poi ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(
+                                        text = poi.name,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Medium
+                                        ),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    val sub = poi.toDisplayAddress()
+                                    if (sub != poi.name) {
+                                        Text(
+                                            text = sub,
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Outlined.LocationOn,
+                                    contentDescription = null,
+                                    tint = AppleBlue,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            onClick = {
+                                editLocation = poi.toDisplayAddress()
+                                showSuggestions = false
+                            }
+                        )
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(14.dp))
 

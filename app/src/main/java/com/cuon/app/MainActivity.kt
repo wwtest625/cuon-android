@@ -1,12 +1,10 @@
 package com.cuon.app
 
 import android.Manifest
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.speech.RecognizerIntent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -18,7 +16,6 @@ import androidx.core.content.ContextCompat
 import com.cuon.app.ui.CuonViewModel
 import com.cuon.app.ui.HomeScreen
 import com.cuon.app.ui.theme.CuonTheme
-import java.util.*
 
 class MainActivity : ComponentActivity() {
 
@@ -34,23 +31,6 @@ class MainActivity : ComponentActivity() {
     ) { isGranted ->
         if (!isGranted) {
             Toast.makeText(this, "未开启通知权限，事项提醒将仅在应用内展示", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    // 原生语音识别启动器
-    private val speechRecognizerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val spokenText = result.data
-                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                ?.firstOrNull()
-
-            if (!spokenText.isNullOrBlank()) {
-                viewModel.processAndSaveInput(spokenText)
-            } else {
-                Toast.makeText(this, "未检测到语音内容", Toast.LENGTH_SHORT).show()
-            }
         }
     }
 
@@ -135,8 +115,8 @@ class MainActivity : ComponentActivity() {
                         onRemoveDraftItem = { index ->
                             viewModel.removeDraftTask(index)
                         },
-                        onVoiceInputClick = {
-                            startSpeechToText()
+                        onVoiceResult = { spokenText ->
+                            viewModel.processAndSaveInput(spokenText)
                         },
                         onTextInputSubmit = { text ->
                             viewModel.processAndSaveInput(text)
@@ -172,19 +152,6 @@ class MainActivity : ComponentActivity() {
             if (permissionStatus != PackageManager.PERMISSION_GRANTED) {
                 requestNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
-        }
-    }
-
-    private fun startSpeechToText() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.CHINESE.toString())
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "请说出您要安排的生活事项...")
-        }
-        try {
-            speechRecognizerLauncher.launch(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "未检测到系统语音服务，可点击下方示例或直接输入", Toast.LENGTH_SHORT).show()
         }
     }
 }

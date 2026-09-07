@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 
@@ -49,6 +50,9 @@ import com.cuon.app.ui.theme.*
 
 import com.cuon.app.ui.components.AiDraftPreviewBottomSheet
 import com.cuon.app.ui.components.TaskEditBottomSheet
+import com.cuon.app.util.SpeechRecognitionManager
+import com.cuon.app.util.openInAmap
+import androidx.compose.ui.platform.LocalContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -71,18 +75,42 @@ fun HomeScreen(
     onConfirmDraft: (List<TaskEntity>) -> Unit = {},
     onUpdateDraftItem: (Int, TaskEntity) -> Unit = { _, _ -> },
     onRemoveDraftItem: (Int) -> Unit = {},
-    onVoiceInputClick: () -> Unit,
+    onVoiceResult: (String) -> Unit,
     onTextInputSubmit: (String) -> Unit
 ) {
     var textInput by remember { mutableStateOf("") }
     val haptic = LocalHapticFeedback.current
     var showCompletedSection by remember { mutableStateOf(false) }
 
+    // 系统级语音听写（直连厂商识别引擎：荣耀 MagicVoice / 小爱 / 讯飞等，无需谷歌服务）
+    val context = LocalContext.current
+    val speechManager = remember { SpeechRecognitionManager(context) }
+    val speechState by speechManager.uiState.collectAsState()
+    var isHoldingMic by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        speechManager.onFinalResult = { spokenText ->
+            isHoldingMic = false
+            if (spokenText != null) {
+                onVoiceResult(spokenText)
+            } else if (speechState.errorMessage.isNotBlank()) {
+                android.widget.Toast.makeText(context, speechState.errorMessage, android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+        onDispose {
+            speechManager.destroy()
+            speechManager.onFinalResult = null
+        }
+    }
+
     val calendarEvents = remember(tasks) { tasks.filter { it.isCalendarEvent } }
     val pendingTodos = remember(tasks) { tasks.filter { !it.isCalendarEvent && !it.isCompleted } }
     val completedTodos = remember(tasks) { tasks.filter { !it.isCalendarEvent && it.isCompleted } }
 
     var selectedCalendarDate by remember { mutableStateOf<Calendar?>(null) }
+
+    // 标签筛选:点击卡片上的 #标签 进入筛选态,再点同一个或点 chip 的 ✕ 取消
+    var selectedTagFilter by remember { mutableStateOf<String?>(null) }
 
     // 处理深链跳转指定日期
     LaunchedEffect(initialSelectedDate) {
@@ -91,9 +119,9 @@ fun HomeScreen(
         }
     }
 
-    val displayCalendarEvents = remember(calendarEvents, selectedCalendarDate) {
+    val displayCalendarEvents = remember(calendarEvents, selectedCalendarDate, selectedTagFilter) {
         val target = selectedCalendarDate
-        if (target == null) calendarEvents
+        val base = if (target == null) calendarEvents
         else {
             calendarEvents.filter { event ->
                 if (event.startTime == null) false
@@ -104,18 +132,30 @@ fun HomeScreen(
                 }
             }
         }
+        if (selectedTagFilter != null) base.filter { it.tag == selectedTagFilter } else base
+    }
+
+    // 标签筛选后的待办/已完成列表
+    val filteredPendingTodos = remember(pendingTodos, selectedTagFilter) {
+        if (selectedTagFilter == null) pendingTodos else pendingTodos.filter { it.tag == selectedTagFilter }
+    }
+    val filteredCompletedTodos = remember(completedTodos, selectedTagFilter) {
+        if (selectedTagFilter == null) completedTodos else completedTodos.filter { it.tag == selectedTagFilter }
     }
 
     // 最新入场的新任务支持流式打字机逐字填字
 
     val streamingTaskIds = remember { mutableStateListOf<Long>() }
     var previousTaskIds by remember { mutableStateOf(tasks.map { it.id }.toSet()) }
+    val sessionStart = remember { System.currentTimeMillis() }
 
     LaunchedEffect(tasks) {
         val currentIds = tasks.map { it.id }.toSet()
         val newIds = currentIds - previousTaskIds
         if (newIds.isNotEmpty()) {
-            streamingTaskIds.addAll(newIds)
+            // 只对本次会话新建的任务放特效;冷启动从数据库加载的存量任务不复播
+            val freshIds = tasks.filter { it.id in newIds && it.createdAt >= sessionStart - 2000 }.map { it.id }
+            streamingTaskIds.addAll(freshIds)
         }
         previousTaskIds = currentIds
     }
@@ -225,7 +265,7 @@ fun HomeScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(16.dp))
                                 .alpha(if (isProcessingAi) 0.45f else 1f)
-                                .clickable(enabled = !isProcessingAi) {
+                                .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onTextInputSubmit(preset)
                                 },
@@ -245,8 +285,6 @@ fun HomeScreen(
                 }
 
                 // 2. 常驻底部 Apple 极简悬浮输入胶囊（支持按住变身炫彩波浪舱）
-                var isHoldingMic by remember { mutableStateOf(false) }
-
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -278,16 +316,11 @@ fun HomeScreen(
                         label = "inputCapsuleMode"
                     ) { holding ->
                         if (holding) {
-                            // 🌟 炫彩波浪声波语音录入舱 (按住状态或点开模式)
+                            // 🌟 真实语音聆听舱：按住即录音，松开即识别发送（直连厂商识别引擎）
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(26.dp))
-                                    .clickable {
-                                        isHoldingMic = false
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onVoiceInputClick()
-                                    }
                                     .padding(horizontal = 16.dp, vertical = 10.dp),
 
                                 horizontalAlignment = Alignment.CenterHorizontally
@@ -299,7 +332,8 @@ fun HomeScreen(
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.weight(1f)
                                     ) {
                                         Box(
                                             modifier = Modifier
@@ -308,17 +342,19 @@ fun HomeScreen(
                                                 .background(AppleRed)
                                         )
                                         Text(
-                                            text = "Siri 极光声浪 · 聆听自然语言中...",
+                                            text = speechState.partialText.ifBlank { "正在聆听，请说出您的生活安排…（松开结束）" },
                                             style = MaterialTheme.typography.labelSmall.copy(
                                                 fontWeight = FontWeight.SemiBold,
                                                 fontSize = 11.sp
                                             ),
-                                            color = AppleBlue
+                                            color = AppleBlue,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
 
                                     Text(
-                                        text = "点击发送 ➔",
+                                        text = "松开发送",
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 11.sp
@@ -329,13 +365,13 @@ fun HomeScreen(
 
                                 Spacer(modifier = Modifier.height(4.dp))
 
-                                // 炫彩流体声波 Canvas 组件
+                                // 炫彩流体声波：振幅绑定真实麦克风音量 (RMS)
                                 com.cuon.app.ui.components.ColorfulVoiceWaveform(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(44.dp),
                                     isListening = true,
-                                    amplitudeMultiplier = 1.25f
+                                    amplitudeMultiplier = (0.3f + speechState.rmsDb / 8f).coerceIn(0.15f, 1.4f)
                                 )
                             }
                         } else {
@@ -347,24 +383,23 @@ fun HomeScreen(
                                     .padding(horizontal = 8.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // 麦克风按钮（带按住变身手势 & 呼吸动画）
+                                // 麦克风按钮：按下立即真实录音，松开立即结束并发送
                                 AppleHoldingPulsingMicButton(
                                     isProcessing = isProcessingAi,
                                     onPressStart = {
                                         isHoldingMic = true
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        speechManager.startListening()
                                     },
                                     onPressEnd = {
                                         if (isHoldingMic) {
-                                            isHoldingMic = false
                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            onVoiceInputClick()
+                                            speechManager.finishListening()
                                         }
                                     },
 
                                     onClick = {
-                                        // 点击快速切换演示炫彩波浪效果
-                                        isHoldingMic = true
+                                        // 极短按视同"按下-松开"完整周期（onPress/onRelease 已覆盖）
                                     }
                                 )
 
@@ -389,19 +424,10 @@ fun HomeScreen(
                                         unfocusedIndicatorColor = Color.Transparent
                                     ),
                                     singleLine = true,
-                                    enabled = !isProcessingAi,
                                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onBackground)
                                 )
 
-                                if (isProcessingAi) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier
-                                            .size(26.dp)
-                                            .padding(4.dp),
-                                        strokeWidth = 2.dp,
-                                        color = AppleBlue
-                                    )
-                                } else if (textInput.isNotBlank()) {
+                                if (textInput.isNotBlank()) {
                                     IconButton(
                                         onClick = {
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -420,6 +446,15 @@ fun HomeScreen(
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
+                                } else if (isProcessingAi) {
+                                    // AI 处理中仍保持可输入，仅无文字时展示进度提示（不再全锁交互）
+                                    CircularProgressIndicator(
+                                        modifier = Modifier
+                                            .size(26.dp)
+                                            .padding(4.dp),
+                                        strokeWidth = 2.dp,
+                                        color = AppleBlue
+                                    )
                                 }
                             }
                         }
@@ -446,6 +481,41 @@ fun HomeScreen(
                         selectedCalendarDate = date
                     }
                 )
+            }
+
+            // 标签筛选激活态 chip
+            if (selectedTagFilter != null) {
+                item(key = "tag_filter_chip") {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = AppleBlue.copy(alpha = 0.08f),
+                        border = BorderStroke(0.5.dp, AppleBlue.copy(alpha = 0.2f))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(start = 8.dp)
+                        ) {
+                            Text(
+                                text = "标签 #${selectedTagFilter}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = AppleBlue,
+                                modifier = Modifier.padding(vertical = 3.dp)
+                            )
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = "清除标签筛选",
+                                tint = AppleBlue,
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clickable { selectedTagFilter = null }
+                                    .padding(3.dp)
+                            )
+                        }
+                    }
+                }
             }
 
             // 王自如式时间块日历：点击某天无缝展开纵向 07:00-23:00 小时时间轴 (V1)
@@ -551,12 +621,12 @@ fun HomeScreen(
                     }
                 }
 
-                if (pendingTodos.isEmpty() && calendarEvents.isEmpty() && !isProcessingAi) {
+                if (filteredPendingTodos.isEmpty() && displayCalendarEvents.isEmpty() && !isProcessingAi) {
                     item {
                         AppleEmptyState()
                     }
                 } else {
-                    items(pendingTodos, key = { "todo_${it.id}_${taskGenerations[it.id] ?: 0}" }) { task ->
+                    items(filteredPendingTodos, key = { "todo_${it.id}_${taskGenerations[it.id] ?: 0}" }) { task ->
                     AnimatedVisibility(
                         visible = true,
                         enter = fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) +
@@ -590,7 +660,11 @@ fun HomeScreen(
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                         onToggleTask(task)
                                     },
-                                    onClick = { onEditTask(task) }
+                                    onClick = { onEditTask(task) },
+                                    onTagClick = { tag ->
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        selectedTagFilter = if (selectedTagFilter == tag) null else tag
+                                    }
                                 )
                             }
                         }
@@ -600,10 +674,10 @@ fun HomeScreen(
 
 
             // 3. 已完成任务
-            if (completedTodos.isNotEmpty() && showCompletedSection) {
+            if (filteredCompletedTodos.isNotEmpty() && showCompletedSection) {
                 item {
                     Text(
-                        text = "已完成 (${completedTodos.size})",
+                        text = "已完成 (${filteredCompletedTodos.size})",
                         style = MaterialTheme.typography.labelLarge.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -611,7 +685,7 @@ fun HomeScreen(
                         modifier = Modifier.padding(top = 14.dp, bottom = 2.dp, start = 4.dp)
                     )
                 }
-                items(completedTodos, key = { "done_${it.id}_${taskGenerations[it.id] ?: 0}" }) { task ->
+                items(filteredCompletedTodos, key = { "done_${it.id}_${taskGenerations[it.id] ?: 0}" }) { task ->
                     AnimatedVisibility(
                         visible = true,
                         enter = fadeIn() + expandVertically(),
@@ -631,7 +705,11 @@ fun HomeScreen(
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onToggleTask(task)
                                 },
-                                onClick = { onEditTask(task) }
+                                onClick = { onEditTask(task) },
+                                onTagClick = { tag ->
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedTagFilter = if (selectedTagFilter == tag) null else tag
+                                }
                             )
                         }
                     }
@@ -739,18 +817,12 @@ fun AppleHoldingPulsingMicButton(
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onPress = {
-                            val startMillis = System.currentTimeMillis()
+                            // 微信式直觉交互：按下立即开始录音，松开立即结束并发送
                             isPressed = true
                             onPressStart()
-                            val released = tryAwaitRelease()
+                            tryAwaitRelease()
                             isPressed = false
-                            val elapsed = System.currentTimeMillis() - startMillis
-                            if (elapsed >= 320) {
-                                onPressEnd()
-                            }
-                        },
-                        onTap = {
-                            onClick()
+                            onPressEnd()
                         }
                     )
                 },
@@ -851,6 +923,7 @@ fun AppleCalendarCard(
     event: TaskEntity,
     onClick: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -924,7 +997,8 @@ fun AppleCalendarCard(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable { openInAmap(context, event.location) }
                         )
                     }
                 }
@@ -961,7 +1035,8 @@ fun AppleCalendarCard(
 fun AppleTaskCard(
     task: TaskEntity,
     onToggle: () -> Unit,
-    onClick: () -> Unit = {}
+    onClick: () -> Unit = {},
+    onTagClick: (String) -> Unit = {}
 ) {
     var isCheckedAnim by remember(task.isCompleted) { mutableStateOf(task.isCompleted) }
 
@@ -1047,7 +1122,8 @@ fun AppleTaskCard(
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium
                                 ),
-                                color = AppleBlue
+                                color = AppleBlue,
+                                modifier = Modifier.clickable { onTagClick(task.tag) }
                             )
                         }
                         if (task.reminderMinutesBefore != null && !task.isCompleted) {
@@ -1072,13 +1148,13 @@ fun AppleTaskCard(
                 }
             }
 
-            // 右侧优先级小指示
+            // 右侧优先级指示:仅高优先级显示红拇指
             if (task.priority == "high" && !task.isCompleted) {
                 Icon(
-                    imageVector = Icons.Filled.Flag,
+                    imageVector = Icons.Filled.ThumbUp,
                     contentDescription = "高优先级",
-                    tint = AppleRed,
-                    modifier = Modifier.size(16.dp)
+                    tint = PriorityHigh,
+                    modifier = Modifier.size(15.dp)
                 )
             }
         }

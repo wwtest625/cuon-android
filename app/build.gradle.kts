@@ -17,6 +17,7 @@ val localProperties = Properties().apply {
 val aiApiKey: String = localProperties.getProperty("AI_API_KEY", "")
 val aiBaseUrl: String = localProperties.getProperty("AI_BASE_URL", "https://apihub.agnes-ai.cn/v1")
 val aiModel: String = localProperties.getProperty("AI_MODEL", "agnes-2.5-flash")
+val amapRestKey: String = localProperties.getProperty("AMAP_REST_KEY", "")
 
 android {
     namespace = "com.cuon.app"
@@ -34,6 +35,7 @@ android {
         buildConfigField("String", "AI_API_KEY", "\"$aiApiKey\"")
         buildConfigField("String", "AI_BASE_URL", "\"$aiBaseUrl\"")
         buildConfigField("String", "AI_MODEL", "\"$aiModel\"")
+        buildConfigField("String", "AMAP_REST_KEY", "\"$amapRestKey\"")
     }
 
     buildTypes {

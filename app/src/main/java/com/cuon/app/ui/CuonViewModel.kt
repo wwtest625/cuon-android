@@ -71,13 +71,19 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // 防重检查
-        if (_isProcessingAi.value) return
+        // 防重检查（交互已解锁，重复提交在此拦截并给出反馈）
+        if (_isProcessingAi.value) {
+            Toast.makeText(getApplication(), "AI 正在拆解上一条，请稍候", Toast.LENGTH_SHORT).show()
+            return
+        }
 
         _isProcessingAi.value = true
         viewModelScope.launch {
             try {
                 val parsedItems = aiService.parseTextToTasks(trimmed)
+                aiService.lastFallbackReason?.let { reason ->
+                    Toast.makeText(getApplication(), "$reason，已将原文存为待办，可稍后重新拆解", Toast.LENGTH_LONG).show()
+                }
                 val defaultRemindedItems = parsedItems.map { item ->
                     if (item.reminderMinutesBefore == null) {
                         if (item.isCalendarEvent) item.copy(reminderMinutesBefore = 15)

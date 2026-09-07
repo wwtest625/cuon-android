@@ -43,23 +43,15 @@ class AiParserServiceTest {
     }
 
     @Test
-    fun testParseLocally_recognizesCalendarAndPriority() {
-        val input = "明天下午两点在星巴克开会讨论需求；紧急提交周报；买两瓶牛奶"
-        val items = aiParserService.parseLocally(input)
+    fun testFallbackToRawTask_honestOutput() {
+        // 方案B：AI 不可用时兜底不做任何猜测式拆解，原文存为单条普通待办
+        val input = "明天下午两点开会讨论需求；紧急提交周报；买两瓶牛奶"
+        val items = aiParserService.fallbackToRawTask(input, "网络超时")
 
-        assertEquals("应成功拆解出 3 个事项", 3, items.size)
-
-        // 验证第1项：包含“开会”，应识别为日程事件
-        assertTrue("包含开会应为日程", items[0].isCalendarEvent)
-        assertEquals("日程", items[0].tag)
-
-        // 验证第2项：包含“紧急”，优先级应为 high
-        assertFalse("提交周报不是日程", items[1].isCalendarEvent)
-        assertEquals("包含紧急应为高优", "high", items[1].priority)
-
-        // 验证第3项：普通事项，默认 medium
-        assertFalse("买牛奶不是日程", items[2].isCalendarEvent)
-        assertEquals("普通事项为中等优先级", "medium", items[2].priority)
+        assertEquals("兜底应只产出单条原文待办", 1, items.size)
+        assertEquals("标题应保留用户原文", input, items[0].title)
+        assertFalse("兜底不应猜测日程类型", items[0].isCalendarEvent)
+        assertEquals("待办", items[0].tag)
     }
 
     @Test
