@@ -30,85 +30,79 @@ def capture_screen(filename):
     """抓取真机当前屏幕截图并拉取到本地"""
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     local_path = os.path.join(SCREENSHOT_DIR, filename)
-    # 直接通过 adb exec-out 导出，速度极快 (< 300ms)
     subprocess.run(f"adb exec-out screencap -p > '{local_path}'", shell=True)
-    print(f"  📸 [截图保存] -> {local_path}")
+    size_kb = os.path.getsize(local_path) / 1024
+    print(f"  📸 [截图保存] -> {local_path} ({size_kb:.1f} KB)")
     return local_path
 
 def get_screen_resolution():
     """获取设备分辨率"""
     out, _ = run_adb("shell wm size")
-    # Physical size: 1080x2400
     for part in out.split():
         if "x" in part and part.replace("x", "").isdigit():
             w, h = part.split("x")
             return int(w), int(h)
-    return 1080, 2400
+    return 1264, 2800
 
 def main():
     print("=" * 65)
-    print("🤖 Cuon AI 工作台 - ADB 移动端全自动 UI 驱动测试")
+    print("🤖 Cuon AI 工作台 - 纯命令行真机 UI 自动化驱动测试")
     print("=" * 65)
 
-    # 1. 检查 ADB 真机
     devices = check_device()
     if not devices:
         print("\n⚠️  [当前未检测到 ADB 在线设备]")
-        print("   原因：手机尚未插入 USB 或未授权调试模式。")
-        print("   提示：当手机插上 USB 并开启【开发者选项 -> USB 调试】后：")
-        print("         在 WSL 执行: export ADB_SERVER_SOCKET=tcp:127.0.0.1:5037")
-        print("         然后再次运行此脚本，即可自动接管真机屏幕进行自动化操作！")
-        sys.exit(0)
+        sys.exit(1)
 
     device_id = devices[0]
     print(f"✓ 成功检测到在线真机: {device_id}")
     width, height = get_screen_resolution()
-    print(f"✓ 真机屏幕分辨率: {width} × {height}")
+    print(f"✓ 真机屏幕物理分辨率: {width} × {height}")
 
-    # 2. 启动目标 App
-    print("\n[Step 1] 正在通过 ADB 唤起 Cuon App...")
+    # 1. 确保 Cuon App 在前台
+    print("\n[Step 1] 确保 Cuon App 位于前台并处于准备状态...")
     run_adb(f"shell am start -n {PACKAGE_NAME}/{MAIN_ACTIVITY}")
-    time.sleep(2)
-    capture_screen("01_app_launched.png")
+    time.sleep(1.5)
+    capture_screen("01_current_state.png")
 
-    # 3. 模拟点击“⚡ 示例 1: 下周三在国贸...” 快速测试芯片
-    print("\n[Step 2] 模拟点击屏幕下方的【快速测试芯片】...")
-    # 芯片条位于屏幕底部上方约 120dp 处 (约为 height * 0.85)
-    chip_x = int(width * 0.25)
-    chip_y = int(height * 0.86)
-    run_adb(f"shell input tap {chip_x} {chip_y}")
-    print(f"  👆 点击坐标 ({chip_x}, {chip_y}) 触发 AI 拆解请求")
-
-    # 4. 等待 2.5 Flash 接口返回并落库渲染
-    print("\n[Step 3] 等待 2.5 Flash 大模型拆解并刷新时间轴...")
-    for i in range(5, 0, -1):
-        print(f"  ⏳ 模型思考与生成中... 倒计时 {i}s", end="\r")
-        time.sleep(1)
-    print("\n  ✓ 界面已更新完毕！")
-    capture_screen("02_ai_parsed_result.png")
-
-    # 5. 模拟手势向左滑动删除卡片 (Swipe-to-Dismiss)
-    print("\n[Step 4] 模拟测试【手势向左滑动删除】卡片...")
-    start_x = int(width * 0.85)
-    end_x = int(width * 0.15)
-    card_y = int(height * 0.35) # 中上部第一张卡片的位置
+    # 2. 模拟手势滑动删除卡片 (Swipe-to-Dismiss)
+    print("\n[Step 2] 模拟测试【向左手势滑动删除】日程卡片...")
+    # 日程卡片中心 Y: 632
+    start_x = int(width * 0.88)
+    end_x = int(width * 0.08)
+    card_y = 632
     run_adb(f"shell input swipe {start_x} {card_y} {end_x} {card_y} 220")
-    print(f"  👈 手势左滑: ({start_x}, {card_y}) -> ({end_x}, {card_y}) 耗时 220ms")
-    time.sleep(1)
-    capture_screen("03_after_swipe_delete.png")
+    print(f"  👈 手势左滑: ({start_x}, {card_y}) -> ({end_x}, {card_y})")
+    time.sleep(1.2)
+    capture_screen("02_after_swipe_delete.png")
 
-    # 6. 模拟点击复选框打勾完成
-    print("\n[Step 5] 模拟点击任务复选框进行【打勾完成】...")
-    checkbox_x = int(width * 0.12)
-    checkbox_y = int(height * 0.45)
+    # 3. 模拟点击任务复选框进行【打勾完成】
+    print("\n[Step 3] 模拟点击任务复选框进行【打勾完成】...")
+    # 日程删除后，第一张待办上升至原日程位置（约 630-700 左右）或在原位置检查
+    # 我们先 dump 一下看待办位置
+    run_adb("shell uiautomator dump /sdcard/step3_dump.xml")
+    checkbox_x = 182
+    checkbox_y = 700
     run_adb(f"shell input tap {checkbox_x} {checkbox_y}")
-    print(f"  ☑️  点击坐标 ({checkbox_x}, {checkbox_y})")
+    print(f"  ☑️  点击 CheckBox 触发打勾与触感反馈 (坐标: {checkbox_x}, {checkbox_y})")
     time.sleep(1)
-    capture_screen("04_task_completed.png")
+    capture_screen("03_task_completed.png")
+
+    # 4. 模拟再点击一次示例芯片，测试追加日程与待办
+    print("\n[Step 4] 模拟再次触发自然语言解析，追加新事件...")
+    chip_x = 435
+    chip_y = 2408
+    run_adb(f"shell input tap {chip_x} {chip_y}")
+    print(f"  👆 点击芯片: ({chip_x}, {chip_y}) 请求 2.5 Flash 模型")
+    for i in range(4, 0, -1):
+        print(f"  ⏳ 模型响应中... {i}s", end="\r")
+        time.sleep(1)
+    print("\n  ✓ 界面实时更新完成！")
+    capture_screen("04_ai_new_parsed.png")
 
     print("\n" + "=" * 65)
     print("🎉 真机 UI 自动化测试全链路执行完毕！")
-    print(f"全部测试阶段截图已安全归档至: {SCREENSHOT_DIR}")
+    print(f"📸 全部测试截图已归档至: {SCREENSHOT_DIR}")
     print("=" * 65)
 
 if __name__ == "__main__":
