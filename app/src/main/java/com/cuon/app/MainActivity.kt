@@ -96,10 +96,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun processAndSaveInput(rawText: String) {
+        val trimmed = rawText.trim()
+        if (trimmed.isBlank()) {
+            Toast.makeText(this, "未检测到输入内容，请说出或输入事项", Toast.LENGTH_SHORT).show()
+            return
+        }
         isProcessingAiState.value = true
         lifecycleScope.launch {
             try {
-                val parsedItems = aiService.parseTextToTasks(rawText)
+                val parsedItems = aiService.parseTextToTasks(trimmed)
+
                 if (parsedItems.isNotEmpty()) {
                     taskDao.insertTasks(parsedItems)
                     val calCount = parsedItems.count { it.isCalendarEvent }

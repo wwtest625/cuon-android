@@ -36,8 +36,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import com.cuon.app.data.local.TaskEntity
+import com.cuon.app.ui.components.AppleCalendarView
 import com.cuon.app.ui.components.ColorfulVoiceWaveform
 import com.cuon.app.ui.components.SkeletonGhostCard
+
 import com.cuon.app.ui.components.StreamingTypewriterCard
 import com.cuon.app.ui.components.ThanosSnapDisintegration
 
@@ -66,7 +68,25 @@ fun HomeScreen(
     val pendingTodos = remember(tasks) { tasks.filter { !it.isCalendarEvent && !it.isCompleted } }
     val completedTodos = remember(tasks) { tasks.filter { !it.isCalendarEvent && it.isCompleted } }
 
+    var selectedCalendarDate by remember { mutableStateOf<Calendar?>(null) }
+
+    val displayCalendarEvents = remember(calendarEvents, selectedCalendarDate) {
+        val target = selectedCalendarDate
+        if (target == null) calendarEvents
+        else {
+            calendarEvents.filter { event ->
+                if (event.startTime == null) false
+                else {
+                    val cal = Calendar.getInstance().apply { timeInMillis = event.startTime }
+                    cal.get(Calendar.YEAR) == target.get(Calendar.YEAR) &&
+                            cal.get(Calendar.DAY_OF_YEAR) == target.get(Calendar.DAY_OF_YEAR)
+                }
+            }
+        }
+    }
+
     // 最新入场的新任务支持流式打字机逐字填字
+
     val streamingTaskIds = remember { mutableStateListOf<Long>() }
     var previousTaskIds by remember { mutableStateOf(tasks.map { it.id }.toSet()) }
 
@@ -79,8 +99,8 @@ fun HomeScreen(
         previousTaskIds = currentIds
     }
 
-
     val demoPresets = listOf(
+
         "下周三下午两点在国贸跟李总聊外贸合同，下周五前把修改草案发他，另外顺便提醒我买两盒咖啡豆",
         "明天上午十点全员季度例会，今晚八点前提交上周工作周报，紧急联系法务审查保密协议",
         "后天下午三点去机场接张教授，预定国宾酒店两间大床房，周日晚上八点聚餐"
@@ -243,9 +263,10 @@ fun HomeScreen(
                                     .clickable {
                                         isHoldingMic = false
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onTextInputSubmit("明天下午两点在三里屯苹果店参加技术沙龙，周五前完成系统重构，顺便提醒我买一束鲜花")
+                                        onVoiceInputClick()
                                     }
                                     .padding(horizontal = 16.dp, vertical = 10.dp),
+
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Row(
@@ -314,9 +335,10 @@ fun HomeScreen(
                                         if (isHoldingMic) {
                                             isHoldingMic = false
                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            onTextInputSubmit("明天下午两点在三里屯苹果店参加技术沙龙，周五前完成系统重构，顺便提醒我买一束鲜花")
+                                            onVoiceInputClick()
                                         }
                                     },
+
                                     onClick = {
                                         // 点击快速切换演示炫彩波浪效果
                                         isHoldingMic = true
@@ -390,17 +412,49 @@ fun HomeScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // 0. 原生 Apple 极简线条日历组件
+
+            item(key = "apple_calendar_component") {
+                AppleCalendarView(
+                    modifier = Modifier.padding(top = 4.dp, bottom = 6.dp),
+                    events = calendarEvents,
+                    selectedDate = selectedCalendarDate,
+                    onDateSelected = { date ->
+                        selectedCalendarDate = date
+                    }
+                )
+            }
+
             // 1. 日程模块
-            if (calendarEvents.isNotEmpty() || isProcessingAi) {
+            if (displayCalendarEvents.isNotEmpty() || isProcessingAi || selectedCalendarDate != null) {
                 item {
-                    Text(
-                        text = "排期日程",
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        ),
-                        modifier = Modifier.padding(top = 10.dp, bottom = 2.dp, start = 4.dp)
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp, bottom = 2.dp, start = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (selectedCalendarDate != null) {
+                                val dateStr = SimpleDateFormat("MM月dd日", Locale.CHINESE).format(selectedCalendarDate!!.time)
+                                "排期日程 ($dateStr)"
+                            } else "排期日程",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        )
+
+                        if (selectedCalendarDate != null) {
+                            TextButton(
+                                onClick = { selectedCalendarDate = null },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                            ) {
+                                Text("查看全部", style = MaterialTheme.typography.labelSmall, color = AppleBlue)
+                            }
+                        }
+                    }
                 }
 
                 // ⚡ 0 毫秒即时响应：AI 思考排期时的微光流体骨架卡片
@@ -410,7 +464,8 @@ fun HomeScreen(
                     }
                 }
 
-                items(calendarEvents, key = { "cal_${it.id}" }) { event ->
+                items(displayCalendarEvents, key = { "cal_${it.id}" }) { event ->
+
                     AnimatedVisibility(
                         visible = true,
                         enter = fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) +
