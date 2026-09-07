@@ -2,27 +2,35 @@ package com.cuon.app.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val PrimaryEmerald = Color(0xFF10B981)
-val PrimaryDarkEmerald = Color(0xFF059669)
+// Apple 风格核心色系
+val AppleBlue = Color(0xFF007AFF)
+val AppleIndigo = Color(0xFF5856D6)
+val AppleGreen = Color(0xFF34C759)
+val AppleRed = Color(0xFFFF3B30)
+val AppleOrange = Color(0xFFFF9500)
+val AppleTeal = Color(0xFF30B0C7)
+val ApplePurple = Color(0xFFAF52DE)
 
-val LightPrimary = Color(0xFF059669)
-val LightOnPrimary = Color(0xFFFFFFFF)
-val LightPrimaryContainer = Color(0xFFD1FAE5)
-val LightOnPrimaryContainer = Color(0xFF064E3B)
-val LightSurface = Color(0xFFF8FAFC)
-val LightOnSurface = Color(0xFF0F172A)
-val LightSurfaceVariant = Color(0xFFE2E8F0)
-val LightOnSurfaceVariant = Color(0xFF475569)
+// 浅色模式 - 纯粹的 Apple 系统底色与极简线条
+val AppleLightBackground = Color(0xFFF2F2F7) // iOS 系统背景灰
+val AppleLightCard = Color(0xFFFFFFFF)       // 纯白卡片
+val AppleLightBorder = Color(0xFFE5E5EA)     // 苹果 0.5dp 极细轮廓分割线
+val AppleLightSecondaryBg = Color(0xFFE5E5EA)
+val AppleLightTextPrimary = Color(0xFF000000)
+val AppleLightTextSecondary = Color(0xFF8E8E93)
+val AppleLightTextTertiary = Color(0xFFC7C7CC)
 
-val DarkPrimary = Color(0xFF34D399)
-val DarkOnPrimary = Color(0xFF064E3B)
-val DarkPrimaryContainer = Color(0xFF065F46)
-val DarkOnPrimaryContainer = Color(0xFFA7F3D0)
-val DarkSurface = Color(0xFF0B0F19)
-val DarkOnSurface = Color(0xFFF1F5F9)
-val DarkSurfaceVariant = Color(0xFF1E293B)
-val DarkOnSurfaceVariant = Color(0xFF94A3B8)
+// 深色模式 - Apple OLED 暗夜黑与精致微光
+val AppleDarkBackground = Color(0xFF000000)
+val AppleDarkCard = Color(0xFF1C1C1E)
+val AppleDarkBorder = Color(0xFF2C2C2E)
+val AppleDarkSecondaryBg = Color(0xFF2C2C2E)
+val AppleDarkTextPrimary = Color(0xFFFFFFFF)
+val AppleDarkTextSecondary = Color(0xFF8E8E93)
+val AppleDarkTextTertiary = Color(0xFF48484A)
 
-val PriorityHigh = Color(0xFFEF4444)
-val PriorityMedium = Color(0xFF3B82F6)
-val PriorityLow = Color(0xFF10B981)
+// 优先级
+val PriorityHigh = AppleRed
+val PriorityMedium = AppleBlue
+val PriorityLow = AppleGreen
+
