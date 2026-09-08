@@ -18,6 +18,7 @@ class BootReceiver : BroadcastReceiver() {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     ReminderScheduler.rescheduleAllFutureReminders(context.applicationContext)
+                    MorningDigestScheduler.scheduleDailyDigest(context.applicationContext)
                 } catch (e: Exception) {
                     Log.e("BootReceiver", "重排提醒失败: ${e.message}", e)
                 } finally {

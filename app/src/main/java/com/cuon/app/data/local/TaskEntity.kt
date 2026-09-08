@@ -21,5 +21,6 @@ data class TaskEntity(
     val tag: String = "默认",
     val location: String = "",
     val reminderMinutesBefore: Int? = null, // null=不提醒, 0=准时, 15=提前15分钟, 30=提前30分钟
+    val recurrenceRule: String? = null, // null=不重复; DAILY=每天, WEEKLY=每周, MONTHLY=每月
     val createdAt: Long = System.currentTimeMillis()
 )

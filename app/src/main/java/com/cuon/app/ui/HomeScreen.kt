@@ -233,13 +233,6 @@ fun HomeScreen(
         previousTaskIds = currentIds
     }
 
-    val demoPresets = listOf(
-
-        "下周六上午九点陪爸妈去中心医院体检，周五前记得电话预约挂号，另外买一箱牛奶看望他们",
-        "女儿9月20日下午三点家长会，提前一天准备好要问老师的问题，下周二是结婚纪念日，订个蛋糕买束花",
-        "周三晚上七点半健身房私教课别忘了，这个月内必须缴物业费和车险，周末抽空带狗狗去打疫苗"
-    )
-
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -325,39 +318,7 @@ fun HomeScreen(
                     .background(MaterialTheme.colorScheme.background)
                     .padding(bottom = 6.dp)
             ) {
-                // 1. Apple 风格快捷示例胶囊条
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    demoPresets.forEachIndexed { index, preset ->
-                        Surface(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(16.dp))
-                                .alpha(if (isProcessingAi) 0.45f else 1f)
-                                .clickable {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onTextInputSubmit(preset)
-                                },
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            border = BorderStroke(0.6.dp, MaterialTheme.colorScheme.outline)
-                        ) {
-                            Text(
-                                text = "⚡ 示例 ${index + 1}: ${preset.take(10)}...",
-                                style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                            )
-                        }
-                    }
-
-                }
-
-                // 2. 常驻底部输入区:语音模式(大麦克风居中)为主 / 文字模式(键盘图标切换)
+                // 常驻底部输入区:语音模式(大麦克风居中)为主 / 文字模式(键盘图标切换)
                 Column(modifier = Modifier.fillMaxWidth()) {
                     // 🎙 聆听面板:按住说话时悬浮在胶囊上方,实时出字
                     val panelState = remember { MutableTransitionState(false) }
@@ -1110,6 +1071,17 @@ fun AppleCalendarCard(
                         )
                     }
                 }
+
+                if (event.description.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = event.description,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             // 右侧相对时间微胶囊 (例如: "今天" / "明天" / "3天后")
@@ -1199,6 +1171,16 @@ fun AppleTaskCard(
                     overflow = TextOverflow.Ellipsis
                 )
 
+                if (task.description.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = task.description,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
                 if ((task.endTime != null && !task.isCompleted) || task.tag.isNotBlank()) {
                     Spacer(modifier = Modifier.height(4.dp))

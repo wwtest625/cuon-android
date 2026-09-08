@@ -1,20 +1,29 @@
 package com.cuon.app.ui
 
 import android.app.Application
+import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cuon.app.BuildConfig
 import com.cuon.app.data.local.AppDatabase
 import com.cuon.app.data.local.TaskEntity
+import com.cuon.app.data.remote.AiOutcome
 import com.cuon.app.data.remote.AiParserService
+import com.cuon.app.data.remote.AiToolCall
+import com.cuon.app.reminder.MorningDigestScheduler
+import com.cuon.app.reminder.RecurrenceHelper
 import com.cuon.app.reminder.ReminderScheduler
 import com.cuon.app.util.CalendarSyncHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
 
 class CuonViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val TAG = "CuonViewModel"
 
     private val db = AppDatabase.getDatabase(application)
     private val taskDao = db.taskDao()
@@ -55,6 +64,7 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 ReminderScheduler.rescheduleAllFutureReminders(application)
+                MorningDigestScheduler.scheduleDailyDigest(application)
             } catch (e: Exception) {
                 // 忽略非致命异常
             }
@@ -62,7 +72,8 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 处理自然语言输入：AI 拆解后生成草稿，弹窗供用户核对纠错，不盲目直接入库
+     * 处理自然语言输入：AI 拆解新事项生成草稿（方案A，核对后入库），
+     * 或路由 AI 返回的管理工具指令（改期/删除/完成/查询）直接执行
      */
     fun processAndSaveInput(rawText: String) {
         val trimmed = rawText.trim()
@@ -80,21 +91,19 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
         _isProcessingAi.value = true
         viewModelScope.launch {
             try {
-                val parsedItems = aiService.parseTextToTasks(trimmed)
-                aiService.lastFallbackReason?.let { reason ->
-                    Toast.makeText(getApplication(), "$reason，已将原文存为待办，可稍后重新拆解", Toast.LENGTH_LONG).show()
-                }
-                val defaultRemindedItems = parsedItems.map { item ->
-                    if (item.reminderMinutesBefore == null) {
-                        if (item.isCalendarEvent) item.copy(reminderMinutesBefore = 15)
-                        else if (item.endTime != null) item.copy(reminderMinutesBefore = 0)
-                        else item
-                    } else item
-                }
-                if (defaultRemindedItems.isNotEmpty()) {
-                    _draftTasks.value = defaultRemindedItems
-                } else {
-                    _draftTasks.value = listOf(TaskEntity(title = trimmed))
+                when (val outcome = aiService.processInput(trimmed)) {
+                    is AiOutcome.ToolCommands -> executeToolCommands(outcome.calls)
+                    is AiOutcome.TaskDrafts -> {
+                        aiService.lastFallbackReason?.let { reason ->
+                            Toast.makeText(getApplication(), "$reason，已将原文存为待办，可稍后重新拆解", Toast.LENGTH_LONG).show()
+                        }
+                        val defaultRemindedItems = outcome.items.map { applyDefaultReminder(it) }
+                        _draftTasks.value = if (defaultRemindedItems.isNotEmpty()) {
+                            defaultRemindedItems
+                        } else {
+                            listOf(TaskEntity(title = trimmed))
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Toast.makeText(getApplication(), "网络超时，已生成普通待办草稿", Toast.LENGTH_SHORT).show()
@@ -103,6 +112,180 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
                 _isProcessingAi.value = false
             }
         }
+    }
+
+    /**
+     * 执行 AI 返回的事项管理工具指令（增删改查路由）
+     */
+    private fun executeToolCommands(calls: List<AiToolCall>) {
+        viewModelScope.launch {
+            val feedback = mutableListOf<String>()
+            val pendingAdds = mutableListOf<TaskEntity>()
+            for (call in calls) {
+                try {
+                    when (call.name) {
+                        "add_task" -> pendingAdds.add(buildTaskFromToolArgs(call.args))
+                        "update_task" -> feedback.add(executeUpdateTask(call.args))
+                        "delete_task" -> feedback.add(executeDeleteTask(call.args))
+                        "complete_task" -> feedback.add(executeCompleteTask(call.args))
+                        "query_tasks" -> feedback.add(executeQueryTasks(call.args))
+                        else -> feedback.add("未知的操作: ${call.name}")
+                    }
+                } catch (e: Exception) {
+                    feedback.add("操作 ${call.name} 执行失败")
+                }
+            }
+            if (pendingAdds.isNotEmpty()) {
+                // 方案A：新增也走草稿预览，由用户核对后入库
+                _draftTasks.value = (_draftTasks.value ?: emptyList()) + pendingAdds
+                feedback.add("已生成 ${pendingAdds.size} 条新事项草稿，请核对确认")
+            }
+            if (feedback.isNotEmpty()) {
+                Toast.makeText(getApplication(), feedback.joinToString("；"), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /** 新事项默认提醒策略：日程提前 15 分钟，有截止时间的准时提醒 */
+    private fun applyDefaultReminder(item: TaskEntity): TaskEntity =
+        if (item.reminderMinutesBefore == null) {
+            if (item.isCalendarEvent) item.copy(reminderMinutesBefore = 15)
+            else if (item.endTime != null) item.copy(reminderMinutesBefore = 0)
+            else item
+        } else item
+
+    /** 把 add_task 工具参数转为任务实体 */
+    private fun buildTaskFromToolArgs(args: Map<String, Any?>): TaskEntity {
+        val title = (args["title"] as? String)?.trim().orEmpty()
+        val isCalendar = when (val raw = args["is_calendar_event"]) {
+            is Boolean -> raw
+            is String -> raw.lowercase() == "true"
+            else -> false
+        }
+        val priority = (args["priority"] as? String)?.trim()?.lowercase()
+            ?.takeIf { it in setOf("high", "medium", "low") } ?: "medium"
+        val tag = (args["tag"] as? String)?.trim().orEmpty()
+        val entity = TaskEntity(
+            title = title.ifBlank { "未命名事项" },
+            isCalendarEvent = isCalendar,
+            startTime = aiService.parseDateStringToMillis(args["start_time"] as? String),
+            endTime = aiService.parseDateStringToMillis(args["end_time"] as? String),
+            priority = priority,
+            location = (args["location"] as? String)?.trim().orEmpty(),
+            tag = tag.ifBlank { if (isCalendar) "日程" else "待办" },
+            reminderMinutesBefore = (args["reminder_minutes_before"] as? Number)?.toInt(),
+            recurrenceRule = RecurrenceHelper.normalize(args["recurrence"] as? String)
+        )
+        return applyDefaultReminder(entity)
+    }
+
+    /** 按标题关键词匹配唯一事项；0 条或多条均返回提示语。改期等场景需能命中已完成事项 */
+    private suspend fun matchTask(keyword: String?, includeCompleted: Boolean = false): Pair<TaskEntity?, String?> {
+        val kw = keyword?.trim().orEmpty()
+        if (kw.isBlank()) return null to "没听清要处理哪件事，请再说一次"
+        val pool = if (includeCompleted) taskDao.getAllTasksOnce() else taskDao.getPendingTasks()
+        val candidates = pool
+            .filter { it.title.contains(kw, ignoreCase = true) }
+        return when {
+            candidates.isEmpty() -> null to "没找到「${kw.take(10)}」相关事项"
+            candidates.size > 1 -> {
+                val names = candidates.take(3).joinToString("、") { "「${it.title.take(8)}」" }
+                null to "匹配到 ${candidates.size} 条 $names，请说得更具体些"
+            }
+            else -> candidates.first() to null
+        }
+    }
+
+    private suspend fun executeUpdateTask(args: Map<String, Any?>): String {
+        val match = matchTask(args["title_keyword"] as? String, includeCompleted = true)
+        val task: TaskEntity = match.first ?: return match.second ?: "未匹配到事项"
+        var updated = task
+        (args["new_title"] as? String)?.trim()?.takeIf { it.isNotBlank() }
+            ?.let { updated = updated.copy(title = it) }
+        (args["new_start_time"] as? String)
+            ?.let { updated = updated.copy(startTime = aiService.parseDateStringToMillis(it)) }
+        (args["new_end_time"] as? String)
+            ?.let { updated = updated.copy(endTime = aiService.parseDateStringToMillis(it)) }
+        (args["new_priority"] as? String)?.trim()?.lowercase()
+            ?.takeIf { it in setOf("high", "medium", "low") }
+            ?.let { updated = updated.copy(priority = it) }
+        (args["new_location"] as? String)?.let { updated = updated.copy(location = it.trim()) }
+        (args["new_reminder_minutes_before"] as? Number)
+            ?.let { updated = updated.copy(reminderMinutesBefore = it.toInt()) }
+        if (args.containsKey("new_recurrence")) {
+            // normalize("none") 返回 null，等价于清除重复规则
+            updated = updated.copy(recurrenceRule = RecurrenceHelper.normalize(args["new_recurrence"] as? String))
+        }
+        (args["mark_completed"])?.let { v ->
+            val mark = (v as? Boolean) ?: (v as? String) == "true"
+            if (mark) updated = updated.copy(isCompleted = true)
+        }
+        taskDao.updateTask(updated)
+        ReminderScheduler.scheduleReminder(getApplication(), updated)
+        if (updated.isCompleted && !task.isCompleted && RecurrenceHelper.isRecurrence(task)) {
+            advanceRecurrence(task)
+        }
+        return "已更新「${task.title.take(10)}」"
+    }
+
+    private suspend fun executeDeleteTask(args: Map<String, Any?>): String {
+        val match = matchTask(args["title_keyword"] as? String)
+        val task: TaskEntity = match.first ?: return match.second ?: "未匹配到事项"
+        lastDeletedTask = task
+        taskDao.deleteTask(task)
+        ReminderScheduler.cancelReminder(getApplication(), task.id)
+        _undoMessage.emit(Pair("已删除：${task.title.take(10)}", task))
+        return "已删除「${task.title.take(10)}」"
+    }
+
+    private suspend fun executeCompleteTask(args: Map<String, Any?>): String {
+        val match = matchTask(args["title_keyword"] as? String)
+        val task: TaskEntity = match.first ?: return match.second ?: "未匹配到事项"
+        val completed = task.copy(isCompleted = true)
+        taskDao.updateTask(completed)
+        ReminderScheduler.scheduleReminder(getApplication(), completed)
+        if (RecurrenceHelper.isRecurrence(task)) advanceRecurrence(task)
+        return "已完成「${task.title.take(10)}」💪"
+    }
+
+    private suspend fun executeQueryTasks(args: Map<String, Any?>): String {
+        val status = (args["status"] as? String)?.trim()?.lowercase().orEmpty()
+        val keyword = (args["keyword"] as? String)?.trim()
+        val scope = (args["scope"] as? String)?.trim()?.lowercase().orEmpty()
+
+        val all = when (status) {
+            "completed" -> taskDao.getAllTasksOnce().filter { it.isCompleted }
+            "all" -> taskDao.getAllTasksOnce()
+            else -> taskDao.getPendingTasks()
+        }
+        var filtered = all
+        if (!keyword.isNullOrBlank()) {
+            filtered = filtered.filter { it.title.contains(keyword, ignoreCase = true) }
+        }
+        val dayStart = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val dayEnd = dayStart + 24 * 60 * 60 * 1000L
+        when (scope) {
+            "today" -> filtered = filtered.filter {
+                (it.startTime ?: it.endTime)?.let { t -> t in dayStart until dayEnd } == true
+            }
+            "upcoming" -> filtered = filtered.filter {
+                val t = it.startTime ?: it.endTime
+                t != null && t >= dayStart
+            }
+        }
+        if (filtered.isEmpty()) return "没有符合条件的事项"
+
+        val fmt = SimpleDateFormat("M月d日 HH:mm", Locale.getDefault())
+        val sorted = filtered.sortedBy { it.startTime ?: it.endTime ?: Long.MAX_VALUE }
+        val shown = sorted.take(5).map { t ->
+            val t0 = t.startTime ?: t.endTime
+            if (t0 != null) "「${t.title.take(10)}」${fmt.format(Date(t0))}" else "「${t.title.take(10)}」"
+        }
+        val more = if (sorted.size > 5) " 等 ${sorted.size} 件" else ""
+        return "共 ${sorted.size} 件：${shown.joinToString("、")}$more"
     }
 
     /**
@@ -212,7 +395,37 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
             val updated = task.copy(isCompleted = !task.isCompleted)
             taskDao.updateTask(updated)
             ReminderScheduler.scheduleReminder(getApplication(), updated)
+            // 重复任务完成时推进下一周期实例（每周一倒垃圾这类）
+            if (updated.isCompleted && RecurrenceHelper.isRecurrence(task)) {
+                advanceRecurrence(task)
+            }
         }
+    }
+
+    /**
+     * 重复任务完成后生成下一个未来周期的实例。
+     * 防重：同标题同规则同锚点的未完成实例已存在时跳过（防止取消完成再完成产生重复）。
+     * 支持多周期追赶：忘记完成的旧任务完成后直接跳到下一个未来周期。
+     */
+    private suspend fun advanceRecurrence(task: TaskEntity) {
+        val rule = task.recurrenceRule ?: return
+        val anchor = task.startTime ?: task.endTime ?: return
+        val nextAnchor = RecurrenceHelper.nextOccurrence(rule, anchor)
+
+        val exists = taskDao.countPendingRecurrenceAt(task.title, rule, nextAnchor) > 0
+        if (exists) return
+
+        val shiftMillis = nextAnchor - anchor
+        fun shift(t: Long?): Long? = t?.let { it + shiftMillis }
+        val next = task.copy(
+            id = 0,
+            isCompleted = false,
+            startTime = shift(task.startTime),
+            endTime = shift(task.endTime),
+            createdAt = System.currentTimeMillis()
+        )
+        val newId = taskDao.insertTask(next)
+        ReminderScheduler.scheduleReminder(getApplication(), next.copy(id = newId))
     }
 
     /**
@@ -238,8 +451,13 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val nextGen = (_taskGenerations.value[taskToRestore.id] ?: 0) + 1
             _taskGenerations.value = _taskGenerations.value + (taskToRestore.id to nextGen)
+            // REPLACE 策略下恢复必然沿用原 id（原行已删除无冲突），
+            // 提醒 PendingIntent 按 taskId 绑定，恢复后依然有效
             val newId = taskDao.insertTask(taskToRestore)
-            val restored = taskToRestore.copy(id = if (newId > 0) newId else taskToRestore.id)
+            if (newId != taskToRestore.id) {
+                Log.w(TAG, "撤销恢复 id 异常: expected=${taskToRestore.id}, actual=$newId")
+            }
+            val restored = taskToRestore.copy(id = newId)
             ReminderScheduler.scheduleReminder(getApplication(), restored)
             lastDeletedTask = null
             Toast.makeText(getApplication(), "已撤销删除", Toast.LENGTH_SHORT).show()

@@ -22,8 +22,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cuon.app.data.local.TaskEntity
+import com.cuon.app.reminder.RecurrenceHelper
 import com.cuon.app.data.remote.AmapPoiService
 import com.cuon.app.util.openInAmap
+import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -42,10 +44,17 @@ fun TaskEditBottomSheet(
     onDelete: (TaskEntity) -> Unit
 ) {
     var editTitle by remember(task.id) { mutableStateOf(task.title) }
+    var editDescription by remember(task.id) { mutableStateOf(task.description) }
     var editLocation by remember(task.id) { mutableStateOf(task.location) }
+    var editStartTime by remember(task.id) { mutableStateOf(task.startTime) }
+    var editEndTime by remember(task.id) { mutableStateOf(task.endTime) }
+    // 时间两步选择状态机: date_start → time_start / date_end → time_end
+    var timePickStage by remember(task.id) { mutableStateOf<String?>(null) }
+    var pickedDateMillis by remember { mutableStateOf(0L) }
     var isCalendarEvent by remember(task.id) { mutableStateOf(task.isCalendarEvent) }
     var selectedTag by remember(task.id) { mutableStateOf(task.tag.ifBlank { "家庭" }) }
     var reminderMinutes by remember(task.id) { mutableStateOf(task.reminderMinutesBefore) }
+    var recurrenceRule by remember(task.id) { mutableStateOf(task.recurrenceRule) }
     var isHighPriority by remember(task.id) { mutableStateOf(task.priority.equals("high", ignoreCase = true)) }
 
     // 地点内联联想：用户实际输入时防抖搜索高德 POI，下拉点选回填
@@ -83,6 +92,12 @@ fun TaskEditBottomSheet(
         0 to "准时",
         15 to "提前15分钟",
         30 to "提前30分钟"
+    )
+    val recurrenceOptions = listOf(
+        null to "不重复",
+        RecurrenceHelper.DAILY to "每天",
+        RecurrenceHelper.WEEKLY to "每周",
+        RecurrenceHelper.MONTHLY to "每月"
     )
 
     ModalBottomSheet(
@@ -172,7 +187,6 @@ fun TaskEditBottomSheet(
                 value = editTitle,
                 onValueChange = { editTitle = it },
                 label = { Text("事项名称") },
-                placeholder = { Text("例如：陪妈妈去同仁医院配药") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -266,10 +280,26 @@ fun TaskEditBottomSheet(
                 }
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 备注输入框：补充细节（挂号科室、礼物偏好、注意事项等）
+            OutlinedTextField(
+                value = editDescription,
+                onValueChange = { editDescription = it },
+                label = { Text("备注 (选填)") },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AppleBlue,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                )
+            )
+
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 时间展示与提醒设置
-            if (task.startTime != null || task.endTime != null) {
+            // 排期时间（点击修改：先选日期、再选时刻）
+            if (editStartTime != null || editEndTime != null) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
@@ -282,17 +312,31 @@ fun TaskEditBottomSheet(
                         Icon(Icons.Outlined.AccessTime, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
-                            val timeStr = buildString {
-                                val sdf = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.CHINESE)
-                                if (task.startTime != null) append(sdf.format(Date(task.startTime)))
-                                if (task.endTime != null) {
-                                    if (isNotEmpty()) append(" - ")
-                                    val timeOnly = SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(task.endTime))
-                                    append(timeOnly)
-                                }
+                            Text(
+                                text = "排期时间 (点击修改)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            val startText = editStartTime
+                            if (startText != null) {
+                                Text(
+                                    text = "开始 " + SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.CHINESE).format(Date(startText)),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                    modifier = Modifier
+                                        .clickable { timePickStage = "date_start" }
+                                        .padding(vertical = 2.dp)
+                                )
                             }
-                            Text(text = "排期时间", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(text = timeStr, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+                            val endText = editEndTime
+                            if (endText != null) {
+                                Text(
+                                    text = "截止 " + SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.CHINESE).format(Date(endText)),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                    modifier = Modifier
+                                        .clickable { timePickStage = "date_end" }
+                                        .padding(vertical = 2.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -320,6 +364,35 @@ fun TaskEditBottomSheet(
                         label = { Text(label, fontSize = 12.sp) },
                         leadingIcon = if (isSelected) {
                             { Icon(Icons.Outlined.NotificationsActive, contentDescription = null, modifier = Modifier.size(14.dp), tint = AppleBlue) }
+                        } else null,
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 重复规则选择（完成后自动生成下一个周期实例）
+            Text(
+                text = "重复设置 (完成后自动排下一次)",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                recurrenceOptions.forEach { (rule, label) ->
+                    val isSelected = recurrenceRule == rule
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { recurrenceRule = rule },
+                        label = { Text(label, fontSize = 12.sp) },
+                        leadingIcon = if (isSelected) {
+                            { Icon(Icons.Outlined.Repeat, contentDescription = null, modifier = Modifier.size(14.dp), tint = AppleBlue) }
                         } else null,
                         shape = RoundedCornerShape(8.dp)
                     )
@@ -399,13 +472,23 @@ fun TaskEditBottomSheet(
 
                 Button(
                     onClick = {
+                        val s = editStartTime
+                        val e = editEndTime
+                        if (s != null && e != null && s > e) {
+                            Toast.makeText(context, "开始时间不能晚于截止时间", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
                         if (editTitle.isNotBlank()) {
                             val updated = task.copy(
                                 title = editTitle.trim(),
+                                description = editDescription.trim(),
                                 location = editLocation.trim(),
+                                startTime = editStartTime,
+                                endTime = editEndTime,
                                 isCalendarEvent = isCalendarEvent,
                                 tag = selectedTag,
                                 reminderMinutesBefore = reminderMinutes,
+                                recurrenceRule = recurrenceRule,
                                 priority = if (isHighPriority) "high" else "medium"
                             )
                             onSave(updated)
@@ -423,6 +506,69 @@ fun TaskEditBottomSheet(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+
+    // DatePicker 返回 UTC 零点，需转本地日历年月日再套所选拍点
+    fun combineLocalDateAndTime(dateMillisUtc: Long, hour: Int, minute: Int): Long {
+        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = dateMillisUtc }
+        return Calendar.getInstance().apply {
+            set(
+                utcCal.get(Calendar.YEAR),
+                utcCal.get(Calendar.MONTH),
+                utcCal.get(Calendar.DAY_OF_MONTH),
+                hour,
+                minute,
+                0
+            )
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+
+    timePickStage?.let { stage ->
+        if (stage == "date_start" || stage == "date_end") {
+            val target = if (stage == "date_start") editStartTime else editEndTime
+            val datePickerState = rememberDatePickerState(initialSelectedDateMillis = target)
+            DatePickerDialog(
+                onDismissRequest = { timePickStage = null },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val sel = datePickerState.selectedDateMillis
+                        if (sel != null) {
+                            pickedDateMillis = sel
+                            timePickStage = if (stage == "date_start") "time_start" else "time_end"
+                        }
+                    }) { Text("下一步") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { timePickStage = null }) { Text("取消") }
+                }
+            ) {
+                DatePicker(state = datePickerState)
+            }
+        } else {
+            val target = if (stage == "time_start") editStartTime else editEndTime
+            val cal = Calendar.getInstance().apply { target?.let { timeInMillis = it } }
+            val timeState = rememberTimePickerState(
+                initialHour = cal.get(Calendar.HOUR_OF_DAY),
+                initialMinute = cal.get(Calendar.MINUTE),
+                is24Hour = true
+            )
+            AlertDialog(
+                onDismissRequest = { timePickStage = null },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val combined = combineLocalDateAndTime(pickedDateMillis, timeState.hour, timeState.minute)
+                        if (stage == "time_start") editStartTime = combined else editEndTime = combined
+                        timePickStage = null
+                    }) { Text("确定") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { timePickStage = null }) { Text("取消") }
+                },
+                title = { Text("选择时刻") },
+                text = { TimePicker(state = timeState) }
+            )
         }
     }
 }

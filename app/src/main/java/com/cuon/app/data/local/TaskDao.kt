@@ -23,6 +23,21 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :id")
     suspend fun getTaskById(id: Long): TaskEntity?
 
+    /** 一次性取全部未完成任务（晨报、AI 工具查询用） */
+    @Query("SELECT * FROM tasks WHERE isCompleted = 0")
+    suspend fun getPendingTasks(): List<TaskEntity>
+
+    /** 一次性取全部任务（AI 工具查询已完成事项用） */
+    @Query("SELECT * FROM tasks")
+    suspend fun getAllTasksOnce(): List<TaskEntity>
+
+    /** 重复任务防重：同标题同规则下，指定周期锚点的未完成实例是否已存在 */
+    @Query(
+        "SELECT COUNT(*) FROM tasks WHERE title = :title AND recurrenceRule = :rule " +
+            "AND (startTime = :anchor OR endTime = :anchor) AND isCompleted = 0"
+    )
+    suspend fun countPendingRecurrenceAt(title: String, rule: String, anchor: Long): Int
+
     @Update
     suspend fun updateTask(task: TaskEntity)
 
