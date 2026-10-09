@@ -35,13 +35,16 @@
             </intent-filter>
         </receiver>
 
-        <!-- 开机与应用升级后重排闹钟接收器 -->
+        <!-- 开机、应用升级、时区/时间变更后重排闹钟接收器 -->
         <receiver
             android:name=".reminder.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <!-- 用户切换时区或手动修改系统时间：9 点晨报与全部提醒都需按新基准重排 -->
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
     </application>

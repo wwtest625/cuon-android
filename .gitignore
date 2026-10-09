@@ -10,3 +10,10 @@
 local.properties
 app/build
 tests/screenshots/
+
+# 端侧模型训练工作区（含 150MB 预训练权重与训练数据，不入库）
+/cuon-ml/
+
+# Agent 工具的本地会话状态（锁文件/任务记录，含 PID 与会话 ID）
+/.codebuddy/
+/.reasonix/

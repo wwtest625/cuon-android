@@ -20,6 +20,8 @@ import java.util.*
 class AlarmReceiver : BroadcastReceiver() {
 
     companion object {
+        private const val TAG = "AlarmReceiver"
+
         const val ACTION_TASK_REMINDER = "com.cuon.app.ACTION_TASK_REMINDER"
         const val ACTION_MORNING_DIGEST = MorningDigestScheduler.ACTION_MORNING_DIGEST
         const val CHANNEL_ID = "cuon_life_reminders"
@@ -47,16 +49,30 @@ class AlarmReceiver : BroadcastReceiver() {
 
     /**
      * 每日晨报：查当天/最近事项，生成俏皮早安通知，并排定次日闹钟
+     *
+     * 关键顺序：**先排次日闹钟，再发通知**。
+     * 历史上通知生成抛异常（如 DB 未就绪、通知渠道异常）会导致后续 scheduleDailyDigest
+     * 永远不被执行，闹钟链条就此断裂 —— 表现为「不是每天都推送」。
+     * 现在两步各自独立 try/catch，任一步失败都不影响另一步。
      */
     private fun handleMorningDigest(context: Context) {
         val appContext = context.applicationContext
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                showMorningDigest(appContext)
-                MorningDigestScheduler.scheduleDailyDigest(appContext)
-            } catch (e: Exception) {
-                Log.e("AlarmReceiver", "晨报生成失败: ${e.message}", e)
+                // 1. 先把次日闹钟排上，保证链条永不中断
+                try {
+                    MorningDigestScheduler.scheduleDailyDigest(appContext)
+                } catch (e: Exception) {
+                    Log.e(TAG, "晨报次日闹钟排期失败(不影响本次通知): ${e.message}", e)
+                }
+
+                // 2. 再发本次通知；失败也绝不影响上面的闹钟链条
+                try {
+                    showMorningDigest(appContext)
+                } catch (e: Exception) {
+                    Log.e(TAG, "晨报通知生成失败: ${e.message}", e)
+                }
             } finally {
                 pendingResult.finish()
             }

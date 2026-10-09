@@ -31,8 +31,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cuon.app.data.local.TaskEntity
-import com.cuon.app.ui.AppleSwipeDismissItem
-import com.cuon.app.ui.AppleTaskCard
 import com.cuon.app.ui.theme.AppleBlue
 import com.cuon.app.ui.theme.AppleRed
 import kotlinx.coroutines.delay

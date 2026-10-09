@@ -60,13 +60,14 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
     val taskGenerations: StateFlow<Map<Long, Int>> = _taskGenerations.asStateFlow()
 
     init {
-        // App 启动时，异步核对并重新调度所有未来提醒
+        // App 启动时，异步核对并重新调度所有未来提醒与每日晨报
         viewModelScope.launch {
             try {
                 ReminderScheduler.rescheduleAllFutureReminders(application)
-                MorningDigestScheduler.scheduleDailyDigest(application)
+                // 自愈式：晨报闹钟若被系统清理或基准时间漂移，这里会被纠正回来
+                MorningDigestScheduler.ensureDailyDigest(application)
             } catch (e: Exception) {
-                // 忽略非致命异常
+                Log.w(TAG, "启动期提醒重排失败: ${e.message}")
             }
         }
     }
