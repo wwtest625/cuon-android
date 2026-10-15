@@ -49,4 +49,22 @@ class TaskEntityTest {
         assertEquals("下一周期实例不应带完成时间", null, nextOccurrence.completedAt)
         assertEquals("下一周期实例不应已完成", false, nextOccurrence.isCompleted)
     }
+
+    @Test
+    fun testDeletedAt_softDeleteBehavior() {
+        val task = TaskEntity(title = "买菜")
+
+        assertEquals("新任务默认不在回收站", null, task.deletedAt)
+
+        // 软删除：只打时间戳，isCompleted 等内容字段原样保留（恢复时不丢状态）
+        val deletedAt = 1700000000000L
+        val trashed = task.copy(deletedAt = deletedAt)
+        assertEquals(deletedAt, trashed.deletedAt)
+        assertFalse(trashed.isCompleted)
+
+        // 恢复 = deletedAt 置回 null，内容不丢
+        val restored = trashed.copy(deletedAt = null)
+        assertEquals(null, restored.deletedAt)
+        assertEquals(task.title, restored.title)
+    }
 }

@@ -11,7 +11,9 @@ import com.cuon.app.data.local.TaskEntity
 import com.cuon.app.data.remote.AiOutcome
 import com.cuon.app.data.remote.AiParserService
 import com.cuon.app.data.remote.AiToolCall
+import com.cuon.app.reminder.CalendarAutoArchiver
 import com.cuon.app.reminder.MorningDigestScheduler
+import com.cuon.app.reminder.RecurrenceAdvancer
 import com.cuon.app.reminder.RecurrenceHelper
 import com.cuon.app.reminder.ReminderScheduler
 import com.cuon.app.util.CalendarSyncHelper
@@ -34,8 +36,12 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
         modelName = BuildConfig.AI_MODEL
     )
 
-    // 全量任务流（屏幕旋转不丢失）
+    // 全量任务流（屏幕旋转不丢失），不含回收站事项
     val tasks: StateFlow<List<TaskEntity>> = taskDao.getAllTasksFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // 回收站（软删除事项，30 天后自动彻底清理）
+    val trash: StateFlow<List<TaskEntity>> = taskDao.getTrashFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // AI 处理状态
@@ -68,6 +74,25 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
                 MorningDigestScheduler.ensureDailyDigest(application)
             } catch (e: Exception) {
                 Log.w(TAG, "启动期提醒重排失败: ${e.message}")
+            }
+        }
+        // 回收站过期清理：删除超过 30 天的事项彻底移除
+        viewModelScope.launch {
+            try {
+                val purged = taskDao.purgeExpiredTrash(
+                    System.currentTimeMillis() - TRASH_RETENTION_DAYS * 24L * 60 * 60 * 1000
+                )
+                if (purged > 0) Log.i(TAG, "回收站过期清理: $purged 条")
+            } catch (e: Exception) {
+                Log.w(TAG, "回收站过期清理失败: ${e.message}")
+            }
+        }
+        // 日程自动归档：距上次晨报之后打开 App 也能把到期日程落进历史
+        viewModelScope.launch {
+            try {
+                CalendarAutoArchiver.scanAndArchive(application)
+            } catch (e: Exception) {
+                Log.w(TAG, "启动期日程归档失败: ${e.message}")
             }
         }
     }
@@ -233,10 +258,10 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
         val match = matchTask(args["title_keyword"] as? String)
         val task: TaskEntity = match.first ?: return match.second ?: "未匹配到事项"
         lastDeletedTask = task
-        taskDao.deleteTask(task)
+        taskDao.softDeleteTask(task.id, System.currentTimeMillis())
         ReminderScheduler.cancelReminder(getApplication(), task.id)
         _undoMessage.emit(Pair("已删除：${task.title.take(10)}", task))
-        return "已删除「${task.title.take(10)}」"
+        return "已删除「${task.title.take(10)}」，30 天内可在回收站找回"
     }
 
     private suspend fun executeCompleteTask(args: Map<String, Any?>): String {
@@ -408,65 +433,65 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 重复任务完成后生成下一个未来周期的实例。
-     * 防重：同标题同规则同锚点的未完成实例已存在时跳过（防止取消完成再完成产生重复）。
-     * 支持多周期追赶：忘记完成的旧任务完成后直接跳到下一个未来周期。
+     * 重复任务完成后生成下一个未来周期的实例（规则见 RecurrenceAdvancer）。
      */
     private suspend fun advanceRecurrence(task: TaskEntity) {
+        val newId = RecurrenceAdvancer.advance(taskDao, task) ?: return
         val rule = task.recurrenceRule ?: return
         val anchor = task.startTime ?: task.endTime ?: return
         val nextAnchor = RecurrenceHelper.nextOccurrence(rule, anchor)
-
-        val exists = taskDao.countPendingRecurrenceAt(task.title, rule, nextAnchor) > 0
-        if (exists) return
-
-        val shiftMillis = nextAnchor - anchor
-        fun shift(t: Long?): Long? = t?.let { it + shiftMillis }
-        val next = task.copy(
-            id = 0,
-            isCompleted = false,
-            completedAt = null,
-            startTime = shift(task.startTime),
-            endTime = shift(task.endTime),
-            createdAt = System.currentTimeMillis()
+        val shift = nextAnchor - anchor
+        fun s(t: Long?): Long? = t?.let { it + shift }
+        ReminderScheduler.scheduleReminder(
+            getApplication(),
+            task.copy(id = newId, isCompleted = false, completedAt = null, startTime = s(task.startTime), endTime = s(task.endTime))
         )
-        val newId = taskDao.insertTask(next)
-        ReminderScheduler.scheduleReminder(getApplication(), next.copy(id = newId))
     }
 
     /**
-     * 删除任务，并暂存以支持撤销 (P2 Undo)
+     * 删除任务（软删除进回收站），并暂存以支持撤销 (P2 Undo)
      */
     fun deleteTask(task: TaskEntity) {
         viewModelScope.launch {
             lastDeletedTask = task
-            taskDao.deleteTask(task)
+            taskDao.softDeleteTask(task.id, System.currentTimeMillis())
             ReminderScheduler.cancelReminder(getApplication(), task.id)
             if (_editingTask.value?.id == task.id) {
                 _editingTask.value = null
             }
-            _undoMessage.emit(Pair("已删除：${task.title.take(10)}...", task))
+            _undoMessage.emit(Pair("已删除，可在回收站找回", task))
         }
     }
 
     /**
-     * 撤销删除恢复任务
+     * 撤销删除恢复任务（从回收站移回）
      */
     fun undoDelete() {
         val taskToRestore = lastDeletedTask ?: return
+        restoreTask(taskToRestore)
+        lastDeletedTask = null
+    }
+
+    /** 从回收站恢复任务 */
+    fun restoreTask(task: TaskEntity) {
         viewModelScope.launch {
-            val nextGen = (_taskGenerations.value[taskToRestore.id] ?: 0) + 1
-            _taskGenerations.value = _taskGenerations.value + (taskToRestore.id to nextGen)
-            // REPLACE 策略下恢复必然沿用原 id（原行已删除无冲突），
-            // 提醒 PendingIntent 按 taskId 绑定，恢复后依然有效
-            val newId = taskDao.insertTask(taskToRestore)
-            if (newId != taskToRestore.id) {
-                Log.w(TAG, "撤销恢复 id 异常: expected=${taskToRestore.id}, actual=$newId")
-            }
-            val restored = taskToRestore.copy(id = newId)
-            ReminderScheduler.scheduleReminder(getApplication(), restored)
-            lastDeletedTask = null
-            Toast.makeText(getApplication(), "已撤销删除", Toast.LENGTH_SHORT).show()
+            val nextGen = (_taskGenerations.value[task.id] ?: 0) + 1
+            _taskGenerations.value = _taskGenerations.value + (task.id to nextGen)
+            taskDao.restoreTask(task.id)
+            ReminderScheduler.scheduleReminder(getApplication(), task)
+            Toast.makeText(getApplication(), "已恢复：${task.title.take(10)}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /** 回收站中彻底删除（不可恢复） */
+    fun deleteForever(task: TaskEntity) {
+        viewModelScope.launch {
+            taskDao.deleteTask(task)
+            Toast.makeText(getApplication(), "已彻底删除", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    companion object {
+        const val TRASH_RETENTION_DAYS = 30L
     }
 }

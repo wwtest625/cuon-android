@@ -24,6 +24,19 @@ class AlarmReceiver : BroadcastReceiver() {
 
         const val ACTION_TASK_REMINDER = "com.cuon.app.ACTION_TASK_REMINDER"
         const val ACTION_MORNING_DIGEST = MorningDigestScheduler.ACTION_MORNING_DIGEST
+
+        /** 日程结束时刻：弹"已完成/稍后"确认通知 */
+        const val ACTION_EVENT_END = "com.cuon.app.ACTION_EVENT_END"
+
+        /** 用户在结束确认通知上点"已完成" → 立即归档 */
+        const val ACTION_ARCHIVE_CONFIRM = "com.cuon.app.ACTION_ARCHIVE_CONFIRM"
+
+        /** 用户点"稍后" → 仅关闭通知，第三天晨报兜底归档 */
+        const val ACTION_EVENT_END_DISMISS = "com.cuon.app.ACTION_EVENT_END_DISMISS"
+
+        /** 结束确认相关的闹钟/通知/按钮 Intent 统一偏移，避免与提前提醒（requestCode=taskId）冲突 */
+        const val END_ALARM_OFFSET = 1_000_000_000
+        const val ARCHIVE_ACTION_OFFSET = 2_000_000_000
         const val CHANNEL_ID = "cuon_life_reminders"
         const val CHANNEL_NAME = "Cuon 生活事项与日程提醒"
         const val CHANNEL_DIGEST_ID = "cuon_morning_digest"
@@ -44,6 +57,9 @@ class AlarmReceiver : BroadcastReceiver() {
         when (intent.action) {
             ACTION_MORNING_DIGEST -> handleMorningDigest(context)
             ACTION_TASK_REMINDER -> handleTaskReminder(context, intent)
+            ACTION_EVENT_END -> handleEventEnd(context, intent)
+            ACTION_ARCHIVE_CONFIRM -> handleArchiveConfirm(context, intent)
+            ACTION_EVENT_END_DISMISS -> handleEventEndDismiss(context, intent)
         }
     }
 
@@ -60,6 +76,17 @@ class AlarmReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                // 0. 先做每日维护：归档到期日程 + 清理过期回收站，让本次晨报与历史基于最新数据
+                try {
+                    val db = AppDatabase.getDatabase(appContext)
+                    CalendarAutoArchiver.scanAndArchive(appContext)
+                    db.taskDao().purgeExpiredTrash(
+                        System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "每日归档/清理失败(不影响晨报通知): ${e.message}", e)
+                }
+
                 // 1. 先把次日闹钟排上，保证链条永不中断
                 try {
                     MorningDigestScheduler.scheduleDailyDigest(appContext)
@@ -194,6 +221,92 @@ class AlarmReceiver : BroadcastReceiver() {
             isCalendar = isCalendar,
             minutesBefore = minutesBefore
         )
+    }
+
+    /**
+     * 日程结束时刻：弹"是否已完成"确认通知。
+     * 用户点"已完成"→ ACTION_ARCHIVE_CONFIRM 立即归档；点"稍后"或忽略 → 通知消失，
+     * 第三天晨报由 CalendarAutoArchiver 兜底归档。
+     */
+    private fun handleEventEnd(context: Context, intent: Intent) {
+        val taskId = intent.getLongExtra(EXTRA_TASK_ID, -1L)
+        if (taskId < 0) return
+        val title = intent.getStringExtra(EXTRA_TASK_TITLE) ?: "日程"
+
+        val doneIntent = Intent(context, AlarmReceiver::class.java).apply {
+            action = ACTION_ARCHIVE_CONFIRM
+            putExtra(EXTRA_TASK_ID, taskId)
+        }
+        val donePending = PendingIntent.getBroadcast(
+            context,
+            taskId.toInt() + ARCHIVE_ACTION_OFFSET,
+            doneIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val dismissIntent = Intent(context, AlarmReceiver::class.java).apply {
+            action = ACTION_EVENT_END_DISMISS
+            putExtra(EXTRA_TASK_ID, taskId)
+        }
+        val dismissPending = PendingIntent.getBroadcast(
+            context,
+            taskId.toInt() + ARCHIVE_ACTION_OFFSET + 1,
+            dismissIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "家庭、健康、生活事项及日程的准时与提前提醒"
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(com.cuon.app.R.drawable.ic_notification)
+            .setContentTitle("日程已结束：$title")
+            .setContentText("完成了吗？")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setAutoCancel(true)
+            .addAction(0, "已完成", donePending)
+            .addAction(0, "稍后", dismissPending)
+            .build()
+
+        notificationManager.notify(taskId.toInt() + END_ALARM_OFFSET, notification)
+    }
+
+    /** 用户点"稍后"：仅关闭结束确认通知，不改数据（第三天晨报兜底归档） */
+    private fun handleEventEndDismiss(context: Context, intent: Intent) {
+        val taskId = intent.getLongExtra(EXTRA_TASK_ID, -1L)
+        if (taskId < 0) return
+        (context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)
+            ?.cancel(taskId.toInt() + END_ALARM_OFFSET)
+    }
+
+    /** 用户在结束确认通知上点"已完成"：立即归档该日程 */
+    private fun handleArchiveConfirm(context: Context, intent: Intent) {
+        val taskId = intent.getLongExtra(EXTRA_TASK_ID, -1L)
+        if (taskId < 0) return
+        val appContext = context.applicationContext
+        val pendingResult = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val task = AppDatabase.getDatabase(appContext).taskDao().getTaskById(taskId)
+                if (task != null && task.isCalendarEvent && !task.isCompleted) {
+                    CalendarAutoArchiver.archive(appContext, AppDatabase.getDatabase(appContext).taskDao(), task, System.currentTimeMillis())
+                    // 归档后取消结束通知，避免残留
+                    (appContext.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)
+                        ?.cancel(taskId.toInt() + END_ALARM_OFFSET)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "归档确认失败: ${e.message}", e)
+            } finally {
+                pendingResult.finish()
+            }
+        }
     }
 
     private fun showNotification(

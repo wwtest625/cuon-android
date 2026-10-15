@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             CuonTheme {
                 val tasks by viewModel.tasks.collectAsState()
+                val trash by viewModel.trash.collectAsState()
                 val isProcessing by viewModel.isProcessingAi.collectAsState()
                 val taskGenerations by viewModel.taskGenerations.collectAsState()
                 val draftTasks by viewModel.draftTasks.collectAsState()
@@ -80,6 +81,7 @@ class MainActivity : ComponentActivity() {
                 ) { padding ->
                     HomeScreen(
                         tasks = tasks,
+                        trash = trash,
                         isProcessingAi = isProcessing,
                         taskGenerations = taskGenerations,
                         draftTasks = draftTasks,
@@ -90,6 +92,12 @@ class MainActivity : ComponentActivity() {
                         },
                         onDeleteTask = { task ->
                             viewModel.deleteTask(task)
+                        },
+                        onRestoreTask = { task ->
+                            viewModel.restoreTask(task)
+                        },
+                        onDeleteForever = { task ->
+                            viewModel.deleteForever(task)
                         },
                         onUpdateTask = { task ->
                             viewModel.updateTask(task)

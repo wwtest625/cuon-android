@@ -70,6 +70,7 @@ import java.util.Calendar
 @Composable
 fun HomeScreen(
     tasks: List<TaskEntity>,
+    trash: List<TaskEntity> = emptyList(),
     isProcessingAi: Boolean,
     taskGenerations: Map<Long, Int> = emptyMap(),
     draftTasks: List<TaskEntity>? = null,
@@ -77,6 +78,8 @@ fun HomeScreen(
     initialSelectedDate: Long? = null,
     onToggleTask: (TaskEntity) -> Unit,
     onDeleteTask: (TaskEntity) -> Unit,
+    onRestoreTask: (TaskEntity) -> Unit = {},
+    onDeleteForever: (TaskEntity) -> Unit = {},
     onUpdateTask: (TaskEntity) -> Unit = {},
     onEditTask: (TaskEntity) -> Unit = {},
     onCloseTaskEditor: () -> Unit = {},
@@ -104,11 +107,11 @@ fun HomeScreen(
         }
     }
 
-    val calendarEvents = remember(tasks) { tasks.filter { it.isCalendarEvent } }
+    val calendarEvents = remember(tasks) { tasks.filter { it.isCalendarEvent && !it.isCompleted } }
     val pendingTodos = remember(tasks) { tasks.filter { !it.isCalendarEvent && !it.isCompleted } }
-    // 已完成按历史归属时间倒序（completedAt ?: startTime ?: endTime ?: createdAt，兼容存量无时间戳数据）
+    // 已完成按历史归属时间倒序（待办 + 归档日程统一进历史；completedAt ?: startTime ?: endTime ?: createdAt 兜底存量）
     val completedTodos = remember(tasks) {
-        tasks.filter { !it.isCalendarEvent && it.isCompleted }
+        tasks.filter { it.isCompleted }
             .sortedByDescending { historyAnchorMillis(it) }
     }
 
@@ -170,7 +173,7 @@ fun HomeScreen(
             HomeTopBar(
                 pendingCount = pendingTodos.size,
                 calendarCount = calendarEvents.size,
-                hasCompleted = completedTodos.isNotEmpty(),
+                hasCompleted = completedTodos.isNotEmpty() || trash.isNotEmpty(),
                 showCompleted = showCompletedSection,
                 onToggleShowCompleted = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -477,7 +480,7 @@ fun HomeScreen(
         )
     }
 
-    // 历史记录底部弹层（另一个浏览视角：全部完成事项按日期倒序分组）
+    // 历史记录底部弹层（另一个浏览视角：全部完成事项按日期倒序分组 + 回收站）
     if (showHistorySheet) {
         HistoryListBottomSheet(
             completedTasks = completedTodos,
@@ -488,7 +491,10 @@ fun HomeScreen(
                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 selectedTagFilter = if (selectedTagFilter == tag) null else tag
                 showHistorySheet = false
-            }
+            },
+            trashedTasks = trash,
+            onRestoreTask = onRestoreTask,
+            onDeleteForever = onDeleteForever
         )
     }
 
