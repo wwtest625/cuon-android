@@ -81,7 +81,7 @@ class AlarmReceiver : BroadcastReceiver() {
                     val db = AppDatabase.getDatabase(appContext)
                     CalendarAutoArchiver.scanAndArchive(appContext)
                     db.taskDao().purgeExpiredTrash(
-                        System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+                        System.currentTimeMillis() - CalendarAutoArchiver.TRASH_RETENTION_DAYS * CalendarAutoArchiver.DAY_MILLIS
                     )
                 } catch (e: Exception) {
                     Log.e(TAG, "每日归档/清理失败(不影响晨报通知): ${e.message}", e)

@@ -43,9 +43,12 @@ object ReminderScheduler {
         }
         setAlarm(context, intent, task.id.toInt(), triggerTime, "提醒")
 
-        // 有提醒的日程：额外在结束时刻排"完成确认"通知，用户 yes/no 决定是否立即归档
+        // 有提醒的日程：额外在结束时刻排"完成确认"通知，用户 yes/no 决定是否立即归档。
+        // 条件不再满足（改期到过去/改成待办/去掉结束时间）时，取消残留的旧结束确认闹钟
         if (task.isCalendarEvent && task.endTime != null && task.endTime > System.currentTimeMillis()) {
             scheduleEndConfirmAlarm(context, task)
+        } else {
+            cancelAlarm(context, AlarmReceiver.ACTION_EVENT_END, task.id.toInt() + AlarmReceiver.END_ALARM_OFFSET)
         }
     }
 
@@ -65,23 +68,24 @@ object ReminderScheduler {
      * 取消特定任务的提醒（含结束确认闹钟）
      */
     fun cancelReminder(context: Context, taskId: Long) {
+        cancelAlarm(context, AlarmReceiver.ACTION_TASK_REMINDER, taskId.toInt())
+        cancelAlarm(context, AlarmReceiver.ACTION_EVENT_END, taskId.toInt() + AlarmReceiver.END_ALARM_OFFSET)
+    }
+
+    /** 按 action + requestCode 精确取消一条闹钟；不存在时静默 */
+    private fun cancelAlarm(context: Context, action: String, requestCode: Int) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        for ((action, code) in listOf(
-            AlarmReceiver.ACTION_TASK_REMINDER to taskId.toInt(),
-            AlarmReceiver.ACTION_EVENT_END to taskId.toInt() + AlarmReceiver.END_ALARM_OFFSET
-        )) {
-            val intent = Intent(context, AlarmReceiver::class.java).apply { this.action = action }
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                code,
-                intent,
-                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-            )
-            if (pendingIntent != null) {
-                alarmManager.cancel(pendingIntent)
-                pendingIntent.cancel()
-                Log.i(TAG, "已取消闹钟: id=$taskId, action=$action")
-            }
+        val intent = Intent(context, AlarmReceiver::class.java).apply { this.action = action }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+            pendingIntent.cancel()
+            Log.i(TAG, "已取消闹钟: code=$requestCode, action=$action")
         }
     }
 

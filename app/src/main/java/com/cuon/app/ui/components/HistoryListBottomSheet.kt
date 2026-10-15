@@ -33,9 +33,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cuon.app.data.local.TaskEntity
+import com.cuon.app.reminder.CalendarAutoArchiver
 import com.cuon.app.ui.formatHistoryGroupLabel
 import com.cuon.app.ui.historyAnchorMillis
-import com.cuon.app.ui.CuonViewModel
 import java.util.Calendar
 
 /**
@@ -143,7 +143,7 @@ fun HistoryListBottomSheet(
                                     )
                                 )
                                 Text(
-                                    text = "保留 ${CuonViewModel.TRASH_RETENTION_DAYS} 天后自动清理",
+                                    text = "保留 ${CalendarAutoArchiver.TRASH_RETENTION_DAYS} 天后自动清理",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(top = 2.dp)
@@ -177,10 +177,10 @@ private fun TrashRow(
 ) {
     val remainingDays = remember(task.deletedAt) {
         val deletedAt = task.deletedAt
-        if (deletedAt == null) CuonViewModel.TRASH_RETENTION_DAYS
+        if (deletedAt == null) CalendarAutoArchiver.TRASH_RETENTION_DAYS
         else {
             val days = (Calendar.getInstance().timeInMillis - deletedAt) / (24L * 60 * 60 * 1000)
-            (CuonViewModel.TRASH_RETENTION_DAYS - days).coerceAtLeast(0)
+            (CalendarAutoArchiver.TRASH_RETENTION_DAYS - days).coerceAtLeast(0)
         }
     }
     Surface(

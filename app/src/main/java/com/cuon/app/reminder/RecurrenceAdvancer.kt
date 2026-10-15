@@ -9,8 +9,8 @@ import com.cuon.app.data.local.TaskEntity
  */
 object RecurrenceAdvancer {
 
-    /** @return 新实例 id，非重复任务 / 已存在下一实例 / 无时间锚点时返回 null */
-    suspend fun advance(taskDao: TaskDao, task: TaskEntity): Long? {
+    /** @return 已插入数据库的下一周期实例（含新 id），非重复任务 / 已存在下一实例 / 无时间锚点时返回 null */
+    suspend fun advance(taskDao: TaskDao, task: TaskEntity): TaskEntity? {
         val rule = task.recurrenceRule ?: return null
         if (!RecurrenceHelper.isRecurrence(task)) return null
         val anchor = task.startTime ?: task.endTime ?: return null
@@ -28,6 +28,7 @@ object RecurrenceAdvancer {
             endTime = shift(task.endTime),
             createdAt = System.currentTimeMillis()
         )
-        return taskDao.insertTask(next)
+        val newId = taskDao.insertTask(next)
+        return next.copy(id = newId)
     }
 }

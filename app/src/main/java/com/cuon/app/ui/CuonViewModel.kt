@@ -80,7 +80,7 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val purged = taskDao.purgeExpiredTrash(
-                    System.currentTimeMillis() - TRASH_RETENTION_DAYS * 24L * 60 * 60 * 1000
+                    System.currentTimeMillis() - CalendarAutoArchiver.TRASH_RETENTION_DAYS * CalendarAutoArchiver.DAY_MILLIS
                 )
                 if (purged > 0) Log.i(TAG, "回收站过期清理: $purged 条")
             } catch (e: Exception) {
@@ -433,19 +433,12 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 重复任务完成后生成下一个未来周期的实例（规则见 RecurrenceAdvancer）。
+     * 重复任务完成后生成下一个未来周期的实例（规则见 RecurrenceAdvancer），
+     * 并按新实例的平移时间排提醒。
      */
     private suspend fun advanceRecurrence(task: TaskEntity) {
-        val newId = RecurrenceAdvancer.advance(taskDao, task) ?: return
-        val rule = task.recurrenceRule ?: return
-        val anchor = task.startTime ?: task.endTime ?: return
-        val nextAnchor = RecurrenceHelper.nextOccurrence(rule, anchor)
-        val shift = nextAnchor - anchor
-        fun s(t: Long?): Long? = t?.let { it + shift }
-        ReminderScheduler.scheduleReminder(
-            getApplication(),
-            task.copy(id = newId, isCompleted = false, completedAt = null, startTime = s(task.startTime), endTime = s(task.endTime))
-        )
+        val next = RecurrenceAdvancer.advance(taskDao, task) ?: return
+        ReminderScheduler.scheduleReminder(getApplication(), next)
     }
 
     /**
@@ -489,9 +482,5 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
             taskDao.deleteTask(task)
             Toast.makeText(getApplication(), "已彻底删除", Toast.LENGTH_SHORT).show()
         }
-    }
-
-    companion object {
-        const val TRASH_RETENTION_DAYS = 30L
     }
 }

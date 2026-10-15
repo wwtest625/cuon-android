@@ -22,6 +22,9 @@ object CalendarAutoArchiver {
 
     const val DAY_MILLIS = 24 * 60 * 60 * 1000L
 
+    /** 回收站保留天数，到期后彻底清理（AlarmReceiver 晨报清理与 ViewModel 冷启动清理共用） */
+    const val TRASH_RETENTION_DAYS = 30L
+
     /** 归档归属时间锚点：结束时间优先，无结束时间用开始时间 */
     fun archiveAnchor(task: TaskEntity): Long? = task.endTime ?: task.startTime
 
@@ -67,9 +70,9 @@ object CalendarAutoArchiver {
         )
         taskDao.updateTask(completed)
         ReminderScheduler.cancelReminder(context, task.id)
-        val newId = RecurrenceAdvancer.advance(taskDao, task)
-        if (newId != null) {
-            ReminderScheduler.scheduleReminder(context, completed.copy(id = newId, isCompleted = false))
+        val next = RecurrenceAdvancer.advance(taskDao, task)
+        if (next != null) {
+            ReminderScheduler.scheduleReminder(context, next)
         }
     }
 
