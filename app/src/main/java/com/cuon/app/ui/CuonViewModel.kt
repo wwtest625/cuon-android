@@ -7,19 +7,25 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cuon.app.BuildConfig
 import com.cuon.app.data.local.AppDatabase
+import com.cuon.app.data.local.AppPreferences
+import com.cuon.app.data.local.BackupData
+import com.cuon.app.data.local.FrequentPlaceEntity
 import com.cuon.app.data.local.TaskEntity
 import com.cuon.app.data.remote.AiOutcome
 import com.cuon.app.data.remote.AiParserService
 import com.cuon.app.data.remote.AiToolCall
+import com.cuon.app.data.remote.UserContext
 import com.cuon.app.reminder.CalendarAutoArchiver
 import com.cuon.app.reminder.MorningDigestScheduler
 import com.cuon.app.reminder.RecurrenceAdvancer
 import com.cuon.app.reminder.RecurrenceHelper
 import com.cuon.app.reminder.ReminderScheduler
 import com.cuon.app.util.CalendarSyncHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -29,6 +35,8 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
     private val taskDao = db.taskDao()
+    private val placeDao = db.frequentPlaceDao()
+    private val prefs = AppPreferences.get(application)
 
     private val aiService = AiParserService(
         apiKey = BuildConfig.AI_API_KEY,
@@ -43,6 +51,14 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
     // 回收站（软删除事项，30 天后自动彻底清理）
     val trash: StateFlow<List<TaskEntity>> = taskDao.getTrashFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // 常用地点簿（AI 上下文注入用，Settings 页读写）
+    val frequentPlaces: StateFlow<List<FrequentPlaceEntity>> = placeDao.getAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // 用户主要生活城市（SharedPreferences 承载，暴露 StateFlow 供 UI 响应）
+    private val _defaultCity = MutableStateFlow(prefs.defaultCity)
+    val defaultCity: StateFlow<String> = _defaultCity.asStateFlow()
 
     // AI 处理状态
     private val _isProcessingAi = MutableStateFlow(false)
@@ -116,8 +132,9 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
 
         _isProcessingAi.value = true
         viewModelScope.launch {
+            val userContext = buildUserContext()
             try {
-                when (val outcome = aiService.processInput(trimmed)) {
+                when (val outcome = aiService.processInput(trimmed, userContext)) {
                     is AiOutcome.ToolCommands -> executeToolCommands(outcome.calls)
                     is AiOutcome.TaskDrafts -> {
                         aiService.lastFallbackReason?.let { reason ->
@@ -483,4 +500,125 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
             Toast.makeText(getApplication(), "已彻底删除", Toast.LENGTH_SHORT).show()
         }
     }
+
+    /** 从当前 prefs + 地点簿构造 AI 上下文（直查 DAO：StateFlow 无人订阅时会回落为空） */
+    private suspend fun buildUserContext(): UserContext = withContext(Dispatchers.IO) {
+        UserContext(
+            defaultCity = _defaultCity.value,
+            frequentPlaces = placeDao.getAllOnce().map {
+                UserContext.FrequentPlace(it.label, it.address, it.city)
+            }
+        )
+    }
+
+    /** 更新默认城市（同步 SharedPreferences 与内存 StateFlow） */
+    fun setDefaultCity(city: String) {
+        val clean = city.trim()
+        prefs.defaultCity = clean
+        _defaultCity.value = clean
+    }
+
+    /** 新增/更新常用地点（label 唯一，重复时提示并拒绝） */
+    fun upsertFrequentPlace(place: FrequentPlaceEntity) {
+        viewModelScope.launch {
+            if (place.label.isBlank() || place.address.isBlank()) {
+                Toast.makeText(getApplication(), "标签和地址不能为空", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val dup = placeDao.countByLabelExcluding(place.label.trim(), place.id)
+            if (dup > 0) {
+                Toast.makeText(getApplication(), "已有同名地点「${place.label}」，请改名或先删除", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            placeDao.upsert(place.copy(label = place.label.trim(), address = place.address.trim(), city = place.city.trim()))
+        }
+    }
+
+    fun deleteFrequentPlace(place: FrequentPlaceEntity) {
+        viewModelScope.launch { placeDao.delete(place) }
+    }
+
+    /**
+     * 备份导出：全量数据（含回收站）序列化为 cache/exports 下 JSON 文件，
+     * 返回 FileProvider 可共享 Uri；失败返回 null 由 UI 提示
+     */
+    suspend fun exportBackup(): android.net.Uri? = withContext(Dispatchers.IO) {
+        try {
+            val data = BackupData(
+                exportedAt = System.currentTimeMillis(),
+                defaultCity = _defaultCity.value,
+                tasks = taskDao.getAllIncludingTrashOnce(),
+                places = placeDao.getAllOnce()
+            )
+            val dir = java.io.File(getApplication<Application>().cacheDir, "exports").apply { mkdirs() }
+            val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.CHINESE)
+                .format(java.util.Date(data.exportedAt))
+            val file = java.io.File(dir, "cuon_backup_$stamp.json")
+            file.writeText(com.google.gson.Gson().toJson(data))
+            androidx.core.content.FileProvider.getUriForFile(
+                getApplication(),
+                "${getApplication<Application>().packageName}.fileprovider",
+                file
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "备份导出失败: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 备份导入。overwrite=true 先清空现有数据（保留备份中的原 id）；
+     * 否则合并：按 标题+开始时间+完成态 防重，地点按 label 防重，全部重新自增 id。
+     * 返回结果摘要文案供 Toast 展示
+     */
+    suspend fun importBackup(uri: android.net.Uri, overwrite: Boolean): String =
+        withContext(Dispatchers.IO) {
+            try {
+                val json = getApplication<Application>().contentResolver
+                    .openInputStream(uri)?.use { it.readBytes().decodeToString() }
+                    ?: return@withContext "无法读取所选文件"
+                val data = com.google.gson.Gson().fromJson(json, BackupData::class.java)
+                if (data == null || data.version != BackupData.CURRENT_VERSION) {
+                    return@withContext "备份文件格式不认识（version 不匹配）"
+                }
+
+                var taskCount = 0
+                var placeCount = 0
+                if (overwrite) {
+                    taskDao.deleteAllTasks()
+                    placeDao.deleteAll()
+                    if (data.tasks.isNotEmpty()) taskDao.insertTasks(data.tasks)
+                    data.places.forEach { placeDao.upsert(it) }
+                    taskCount = data.tasks.size
+                    placeCount = data.places.size
+                } else {
+                    val seenTaskKeys = HashSet<String>()
+                    val toInsert = data.tasks.filter { task ->
+                        val key = "${task.title}|${task.startTime ?: -1}|${task.isCompleted}"
+                        seenTaskKeys.add(key) && taskDao.countDuplicate(task.title, task.startTime, task.isCompleted) == 0
+                    }
+                    if (toInsert.isNotEmpty()) {
+                        taskDao.insertTasks(toInsert.map { it.copy(id = 0) })
+                        taskCount = toInsert.size
+                    }
+                    val seenLabels = HashSet<String>()
+                    val newPlaces = data.places.filter {
+                        seenLabels.add(it.label) && placeDao.countByLabel(it.label) == 0
+                    }
+                    newPlaces.forEach { placeDao.upsert(it.copy(id = 0)) }
+                    placeCount = newPlaces.size
+                }
+
+                if (data.defaultCity.isNotBlank() && _defaultCity.value.isBlank()) {
+                    prefs.defaultCity = data.defaultCity
+                    _defaultCity.value = data.defaultCity
+                }
+                // 导入即视为日程全变，重排所有未来提醒
+                ReminderScheduler.rescheduleAllFutureReminders(getApplication())
+                "导入完成：${taskCount} 条事项、${placeCount} 个常用地点"
+            } catch (e: Exception) {
+                Log.w(TAG, "备份导入失败: ${e.message}")
+                "导入失败：${e.message}"
+            }
+        }
 }

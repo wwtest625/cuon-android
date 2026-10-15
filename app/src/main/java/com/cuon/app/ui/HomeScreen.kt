@@ -89,7 +89,8 @@ fun HomeScreen(
     onUpdateDraftItem: (Int, TaskEntity) -> Unit = { _, _ -> },
     onRemoveDraftItem: (Int) -> Unit = {},
     onVoiceResult: (String) -> Unit = {},
-    onTextInputSubmit: (String) -> Unit = {}
+    onTextInputSubmit: (String) -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -182,7 +183,8 @@ fun HomeScreen(
                 onOpenHistory = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     showHistorySheet = true
-                }
+                },
+                onOpenSettings = onOpenSettings
             )
         },
         bottomBar = {

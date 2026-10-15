@@ -58,19 +58,23 @@ class AiParserService(
 
     /**
      * 将输入的自然语言（语音或文本）送入大模型：
-     * 记录新事项时拆解为任务草稿；修改/删除/完成/查询已有事项时返回工具调用指令
+     * 记录新事项时拆解为任务草稿；修改/删除/完成/查询已有事项时返回工具调用指令。
+     *
+     * @param userContext 用户档案（默认城市 + 常用地点），非空时注入 system prompt
      */
-    suspend fun processInput(input: String): AiOutcome = withContext(Dispatchers.IO) {
+    suspend fun processInput(input: String, userContext: UserContext? = null): AiOutcome = withContext(Dispatchers.IO) {
         if (input.isBlank()) return@withContext AiOutcome.TaskDrafts(emptyList())
 
         val now = Date()
         val currentTimeString = SimpleDateFormat("yyyy-MM-dd HH:mm:ss EEEE", Locale.CHINESE).format(now)
         lastFallbackReason = null
 
+        val profileBlock = userContext?.takeIf { !it.isEmpty }?.toPromptBlock() ?: ""
         val systemPrompt = """
             你是一个专业的个人生活事项管理助手，帮助用户守护生活中容易疏忽的重要事务。
             用户的工作事项通常不易遗忘，而家庭、健康、纪念日等生活事务一旦疏忽代价很高，请重点保障这类事项被完整拆解、绝不遗漏。
             当前系统基准时间是: $currentTimeString。
+            $profileBlock
             用户输入多来自语音转写，常为口语且带转写噪声（多余空格、语气词、数字混写），你必须：
             1) 将 title 整理为简练的书面用语（如"10 月六号 我结婚"→"举办婚礼"；"买两盒咖啡豆"→"购买咖啡豆"），不得原样照抄口语；
             2) 只要句中出现明确日期或时间（X月X号/X日、明天/后天/下周X、几点钟等），该条必须 isCalendarEvent=true，并将 startTime 精确计算为绝对时间（格式 YYYY-MM-DD HH:mm:ss），未说时刻的默认当天 09:00:00，月日已过今年的推算为明年；
@@ -84,6 +88,7 @@ class AiParserService(
                - 查询/盘点事项（"今天有什么事/周几有安排"）→ 调用 query_tasks；
                - 周期性事项（"每周一倒垃圾/每天吃药"）→ add_task 时传 recurrence，并给出下一次发生的绝对时间。
             只有当输入与事项管理完全无关（纯闲聊）时，才返回 items 为空数组的 JSON。
+            若上方存在【用户档案】：输入命中档案中的常用地点指代（如「回家」）时，location 必须填档案对应地址，禁止留空。
             返回 JSON 时的严格格式：
             {
               "items": [
@@ -93,7 +98,7 @@ class AiParserService(
                   "startTime": "YYYY-MM-DD HH:mm:ss或null",
                   "endTime": "YYYY-MM-DD HH:mm:ss或null",
                   "priority": "high/medium/low (纪念日/生日/体检/婚宴/家庭约定等重要生活事项应为high)",
-                  "location": "地点，无则留空",
+                  "location": "地点；命中用户档案常用地点时必须填其完整地址，否则无则留空",
                   "tag": "家庭/健康/个人/财务/纪念/社交 之一"
                 }
               ]
@@ -254,7 +259,7 @@ class AiParserService(
                     "start_time" to ("string" to "绝对开始时间，格式 YYYY-MM-DD HH:mm:ss；有明确日期必填，未说时刻默认当天 09:00:00，月日已过今年的推算为明年"),
                     "end_time" to ("string" to "绝对结束/截止时间，格式 YYYY-MM-DD HH:mm:ss，无则不传"),
                     "priority" to ("string" to "high/medium/low，纪念日、生日、体检、婚宴、家庭约定等重要生活事项为 high"),
-                    "location" to ("string" to "地点，无则不传"),
+                    "location" to ("string" to "地点；输入命中【用户档案】常用地点指代（如「回家」）时必须填档案对应完整地址，其余无则不传"),
                     "tag" to ("string" to "家庭/健康/个人/财务/纪念/社交 之一"),
                     "reminder_minutes_before" to ("integer" to "提前提醒的分钟数，不填由 App 按默认策略处理"),
                     "recurrence" to ("string" to "重复规则: daily=每天、weekly=每周、monthly=每月。用户说「每天/每周一/每月X号提醒我…」时传对应值，不重复则不传")

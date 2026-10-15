@@ -3,10 +3,12 @@ package com.cuon.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -15,7 +17,9 @@ import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 import com.cuon.app.ui.CuonViewModel
 import com.cuon.app.ui.HomeScreen
+import com.cuon.app.ui.SettingsScreen
 import com.cuon.app.ui.theme.CuonTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -53,6 +57,24 @@ class MainActivity : ComponentActivity() {
                 val editingTask by viewModel.editingTask.collectAsState()
                 val snackbarHostState = remember { SnackbarHostState() }
 
+                // 顶层状态切换首页/设置页（未引入 Navigation 库）
+                var showSettings by remember { mutableStateOf(false) }
+
+                // 备份导出/导入：SAF 选文件 + 合并/覆盖确认
+                val uiScope = rememberCoroutineScope()
+                var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
+                val importLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument()
+                ) { uri -> if (uri != null) pendingImportUri = uri }
+
+                fun runImport(uri: Uri, overwrite: Boolean) {
+                    pendingImportUri = null
+                    uiScope.launch {
+                        val result = viewModel.importBackup(uri, overwrite)
+                        Toast.makeText(this@MainActivity, result, Toast.LENGTH_LONG).show()
+                    }
+                }
+
                 // 监听删除消息，提供撤销 (Undo) 交互
                 LaunchedEffect(Unit) {
                     viewModel.undoMessage.collect { (msg, _) ->
@@ -79,6 +101,34 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 ) { padding ->
+                    if (showSettings) {
+                        val defaultCity by viewModel.defaultCity.collectAsState()
+                        val frequentPlaces by viewModel.frequentPlaces.collectAsState()
+                        SettingsScreen(
+                            defaultCity = defaultCity,
+                            frequentPlaces = frequentPlaces,
+                            onBack = { showSettings = false },
+                            onSetDefaultCity = { viewModel.setDefaultCity(it) },
+                            onUpsertPlace = { viewModel.upsertFrequentPlace(it) },
+                            onDeletePlace = { viewModel.deleteFrequentPlace(it) },
+                            onExportBackup = {
+                                uiScope.launch {
+                                    val uri = viewModel.exportBackup()
+                                    if (uri == null) {
+                                        Toast.makeText(this@MainActivity, "备份导出失败", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        val send = Intent(Intent.ACTION_SEND).apply {
+                                            type = "application/json"
+                                            putExtra(Intent.EXTRA_STREAM, uri)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        startActivity(Intent.createChooser(send, "分享备份文件"))
+                                    }
+                                }
+                            },
+                            onImportBackup = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }
+                        )
+                    } else {
                     HomeScreen(
                         tasks = tasks,
                         trash = trash,
@@ -128,8 +178,28 @@ class MainActivity : ComponentActivity() {
                         },
                         onTextInputSubmit = { text ->
                             viewModel.processAndSaveInput(text)
-                        }
+                        },
+                        onOpenSettings = { showSettings = true }
                     )
+                    }
+
+                    pendingImportUri?.let { uri ->
+                        AlertDialog(
+                            onDismissRequest = { pendingImportUri = null },
+                            title = { Text("导入备份") },
+                            text = {
+                                Text("「合并导入」保留现有数据，按内容去重后追加；「覆盖导入」将清空现有全部事项与地点，再按备份恢复。")
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { runImport(uri, overwrite = false) }) { Text("合并导入") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { runImport(uri, overwrite = true) }) {
+                                    Text("覆盖导入", color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }

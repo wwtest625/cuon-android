@@ -26,6 +26,17 @@
             </intent-filter>
         </activity>
 
+        <!-- 备份导出文件共享（cache/exports 下 JSON） -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- 定时提醒广播接收器 -->
         <receiver
             android:name=".reminder.AlarmReceiver"

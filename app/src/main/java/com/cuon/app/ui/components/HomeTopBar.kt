@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,6 +41,7 @@ import com.cuon.app.ui.theme.AppleBlue
  * @param showCompleted 当前是否展示已完成分区
  * @param onToggleShowCompleted 切换回调
  * @param onOpenHistory 打开历史记录弹层（另一个浏览视角）
+ * @param onOpenSettings 打开设置页
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,7 +51,8 @@ fun HomeTopBar(
     hasCompleted: Boolean,
     showCompleted: Boolean,
     onToggleShowCompleted: () -> Unit,
-    onOpenHistory: () -> Unit = {}
+    onOpenHistory: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     TopAppBar(
         title = {
@@ -124,6 +127,14 @@ fun HomeTopBar(
                         modifier = Modifier.size(20.dp)
                     )
                 }
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(
+                    imageVector = Icons.Outlined.Settings,
+                    contentDescription = "设置",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(

@@ -20,6 +20,21 @@ interface TaskDao {
     )
     suspend fun getUnarchivedFinishedCalendarEventsBefore(upper: Long): List<TaskEntity>
 
+    /** 备份导出：含回收站在内物理全量 */
+    @Query("SELECT * FROM tasks")
+    suspend fun getAllIncludingTrashOnce(): List<TaskEntity>
+
+    /** 备份覆盖导入：清空全表 */
+    @Query("DELETE FROM tasks")
+    suspend fun deleteAllTasks()
+
+    /** 合并导入防重：同标题同开始时间同完成态视为重复 */
+    @Query(
+        "SELECT COUNT(*) FROM tasks WHERE title = :title " +
+            "AND IFNULL(startTime, -1) = IFNULL(:startTime, -1) AND isCompleted = :isCompleted"
+    )
+    suspend fun countDuplicate(title: String, startTime: Long?, isCompleted: Boolean): Int
+
     @Query("SELECT * FROM tasks WHERE isCalendarEvent = 1 AND deletedAt IS NULL ORDER BY startTime ASC")
     fun getCalendarEventsFlow(): Flow<List<TaskEntity>>
 
