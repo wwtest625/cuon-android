@@ -51,6 +51,7 @@ import com.cuon.app.ui.components.AppleEmptyState
 import com.cuon.app.ui.components.AppleSwipeDismissItem
 import com.cuon.app.ui.components.AppleTaskCard
 import com.cuon.app.ui.components.AppleTimeBlockingCalendarView
+import com.cuon.app.ui.components.HistoryListBottomSheet
 import com.cuon.app.ui.components.HomeInputBar
 import com.cuon.app.ui.components.HomeTopBar
 import com.cuon.app.ui.components.SkeletonGhostCard
@@ -94,6 +95,7 @@ fun HomeScreen(
     // 标签筛选:点击卡片上的 #标签 进入筛选态,再点同一个或点 chip 的 ✕ 取消
     var selectedTagFilter by remember { mutableStateOf<String?>(null) }
     var showCompletedSection by remember { mutableStateOf(true) }
+    var showHistorySheet by remember { mutableStateOf(false) }
 
     // 处理深链跳转指定日期
     LaunchedEffect(initialSelectedDate) {
@@ -104,7 +106,22 @@ fun HomeScreen(
 
     val calendarEvents = remember(tasks) { tasks.filter { it.isCalendarEvent } }
     val pendingTodos = remember(tasks) { tasks.filter { !it.isCalendarEvent && !it.isCompleted } }
-    val completedTodos = remember(tasks) { tasks.filter { !it.isCalendarEvent && it.isCompleted } }
+    // 已完成按历史归属时间倒序（completedAt ?: startTime ?: endTime ?: createdAt，兼容存量无时间戳数据）
+    val completedTodos = remember(tasks) {
+        tasks.filter { !it.isCalendarEvent && it.isCompleted }
+            .sortedByDescending { historyAnchorMillis(it) }
+    }
+
+    // 选中某天 → 该日完成的待办（历史记录 · 日历视角）
+    val dayCompletedTodos = remember(completedTodos, selectedCalendarDate, selectedTagFilter) {
+        val target = selectedCalendarDate ?: return@remember emptyList()
+        val byDay = completedTodos.filter { task ->
+            val anchor = Calendar.getInstance().apply { timeInMillis = historyAnchorMillis(task) }
+            anchor.get(Calendar.YEAR) == target.get(Calendar.YEAR) &&
+                    anchor.get(Calendar.DAY_OF_YEAR) == target.get(Calendar.DAY_OF_YEAR)
+        }
+        if (selectedTagFilter != null) byDay.filter { it.tag == selectedTagFilter } else byDay
+    }
 
     // 选中某天 → 只看当天日程；否则看全部日程（可叠加标签筛选）
     val displayCalendarEvents = remember(calendarEvents, selectedCalendarDate, selectedTagFilter) {
@@ -158,6 +175,10 @@ fun HomeScreen(
                 onToggleShowCompleted = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     showCompletedSection = !showCompletedSection
+                },
+                onOpenHistory = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    showHistorySheet = true
                 }
             )
         },
@@ -238,6 +259,34 @@ fun HomeScreen(
                         onDeleteTask = onDeleteTask,
                         onUpdateTask = onUpdateTask,
                         onEditTask = onEditTask
+                    )
+                }
+            }
+
+            // 该日完成（历史记录 · 日历视角）：选中某天时展示当天完成的待办，空则隐藏不占位
+            if (selectedCalendarDate != null && dayCompletedTodos.isNotEmpty()) {
+                item(key = "day_completed_header") {
+                    Text(
+                        text = "该日完成 (${dayCompletedTodos.size})",
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.padding(top = 14.dp, bottom = 2.dp, start = 4.dp)
+                    )
+                }
+                items(dayCompletedTodos, key = { "daydone_${it.id}_${taskGenerations[it.id] ?: 0}" }) { task ->
+                    AppleTaskCard(
+                        task = task,
+                        onToggle = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onToggleTask(task)
+                        },
+                        onClick = { onEditTask(task) },
+                        onTagClick = { tag ->
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            selectedTagFilter = if (selectedTagFilter == tag) null else tag
+                        }
                     )
                 }
             }
@@ -370,8 +419,8 @@ fun HomeScreen(
                 }
             }
 
-            // 3. 已完成任务
-            if (filteredCompletedTodos.isNotEmpty() && showCompletedSection) {
+            // 3. 已完成任务（选中日期时隐藏，避免与"该日完成"分区信息重复）
+            if (selectedCalendarDate == null && filteredCompletedTodos.isNotEmpty() && showCompletedSection) {
                 item {
                     Text(
                         text = "已完成 (${filteredCompletedTodos.size})",
@@ -425,6 +474,21 @@ fun HomeScreen(
             onConfirmAll = { confirmedList -> onConfirmDraft(confirmedList) },
             onItemUpdate = { index, updated -> onUpdateDraftItem(index, updated) },
             onItemRemove = { index -> onRemoveDraftItem(index) }
+        )
+    }
+
+    // 历史记录底部弹层（另一个浏览视角：全部完成事项按日期倒序分组）
+    if (showHistorySheet) {
+        HistoryListBottomSheet(
+            completedTasks = completedTodos,
+            onDismiss = { showHistorySheet = false },
+            onToggleTask = onToggleTask,
+            onEditTask = onEditTask,
+            onTagClick = { tag ->
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                selectedTagFilter = if (selectedTagFilter == tag) null else tag
+                showHistorySheet = false
+            }
         )
     }
 

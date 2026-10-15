@@ -17,6 +17,7 @@ data class TaskEntity(
     val startTime: Long? = null,        // 毫秒时间戳
     val endTime: Long? = null,          // 毫秒时间戳
     val isCompleted: Boolean = false,
+    val completedAt: Long? = null,      // 完成时间戳（毫秒），未完成为 null；历史记录追溯依据
     val priority: String = "medium",    // high, medium, low
     val tag: String = "默认",
     val location: String = "",

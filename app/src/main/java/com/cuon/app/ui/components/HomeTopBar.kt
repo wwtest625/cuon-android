@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,13 +32,14 @@ import androidx.compose.ui.unit.sp
 import com.cuon.app.ui.theme.AppleBlue
 
 /**
- * 首页顶栏：品牌标识 + 待办/日程数量摘要 + 已完成显隐切换
+ * 首页顶栏：品牌标识 + 待办/日程数量摘要 + 历史记录入口 + 已完成显隐切换
  *
  * @param pendingCount 未完成待办数量
  * @param calendarCount 日程数量
- * @param hasCompleted 是否存在已完成待办（无则隐藏切换按钮）
+ * @param hasCompleted 是否存在已完成待办（无则隐藏历史与切换按钮）
  * @param showCompleted 当前是否展示已完成分区
  * @param onToggleShowCompleted 切换回调
+ * @param onOpenHistory 打开历史记录弹层（另一个浏览视角）
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,7 +48,8 @@ fun HomeTopBar(
     calendarCount: Int,
     hasCompleted: Boolean,
     showCompleted: Boolean,
-    onToggleShowCompleted: () -> Unit
+    onToggleShowCompleted: () -> Unit,
+    onOpenHistory: () -> Unit = {}
 ) {
     TopAppBar(
         title = {
@@ -105,6 +108,14 @@ fun HomeTopBar(
         },
         actions = {
             if (hasCompleted) {
+                IconButton(onClick = onOpenHistory) {
+                    Icon(
+                        imageVector = Icons.Outlined.History,
+                        contentDescription = "历史记录",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
                 IconButton(onClick = onToggleShowCompleted) {
                     Icon(
                         imageVector = if (showCompleted) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,

@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cuon.app.data.local.TaskEntity
+import com.cuon.app.ui.formatCompletedAt
 import com.cuon.app.ui.formatSmartDeadline
 import com.cuon.app.ui.theme.AppleBlue
 import com.cuon.app.ui.theme.AppleRed
@@ -126,12 +127,25 @@ fun AppleTaskCard(
                     )
                 }
 
-                if ((task.endTime != null && !task.isCompleted) || task.tag.isNotBlank()) {
+                if ((task.endTime != null && !task.isCompleted) || task.tag.isNotBlank() ||
+                    (task.isCompleted && task.completedAt != null)
+                ) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // 完成时间徽标：历史记录可追溯
+                        if (task.isCompleted && task.completedAt != null) {
+                            Text(
+                                text = "\u2713 ${formatCompletedAt(task.completedAt)}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
                         if (task.endTime != null && !task.isCompleted) {
                             Surface(
                                 shape = RoundedCornerShape(6.dp),

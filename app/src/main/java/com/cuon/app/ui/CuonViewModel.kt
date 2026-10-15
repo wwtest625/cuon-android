@@ -219,7 +219,7 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
         }
         (args["mark_completed"])?.let { v ->
             val mark = (v as? Boolean) ?: (v as? String) == "true"
-            if (mark) updated = updated.copy(isCompleted = true)
+            if (mark) updated = updated.copy(isCompleted = true, completedAt = System.currentTimeMillis())
         }
         taskDao.updateTask(updated)
         ReminderScheduler.scheduleReminder(getApplication(), updated)
@@ -242,7 +242,7 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun executeCompleteTask(args: Map<String, Any?>): String {
         val match = matchTask(args["title_keyword"] as? String)
         val task: TaskEntity = match.first ?: return match.second ?: "未匹配到事项"
-        val completed = task.copy(isCompleted = true)
+        val completed = task.copy(isCompleted = true, completedAt = System.currentTimeMillis())
         taskDao.updateTask(completed)
         ReminderScheduler.scheduleReminder(getApplication(), completed)
         if (RecurrenceHelper.isRecurrence(task)) advanceRecurrence(task)
@@ -393,7 +393,11 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
             if (delayMillis > 0) {
                 delay(delayMillis)
             }
-            val updated = task.copy(isCompleted = !task.isCompleted)
+            // 以旧值判断：完成 → 记录完成时间；取消完成 → 清空（历史记录随之移出"该日完成"）
+            val updated = task.copy(
+                isCompleted = !task.isCompleted,
+                completedAt = if (!task.isCompleted) System.currentTimeMillis() else null
+            )
             taskDao.updateTask(updated)
             ReminderScheduler.scheduleReminder(getApplication(), updated)
             // 重复任务完成时推进下一周期实例（每周一倒垃圾这类）
@@ -421,6 +425,7 @@ class CuonViewModel(application: Application) : AndroidViewModel(application) {
         val next = task.copy(
             id = 0,
             isCompleted = false,
+            completedAt = null,
             startTime = shift(task.startTime),
             endTime = shift(task.endTime),
             createdAt = System.currentTimeMillis()

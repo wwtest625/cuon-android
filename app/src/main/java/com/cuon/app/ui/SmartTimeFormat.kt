@@ -73,3 +73,37 @@ fun formatSmartDeadline(endTime: Long): String {
         else -> SimpleDateFormat("MM月dd日 HH:mm", Locale.CHINESE).format(Date(endTime))
     }
 }
+
+/** 完成时间徽标：今天 HH:mm / 昨天 HH:mm / 今年 M月d日 / 跨年 yyyy年M月d日 */
+fun formatCompletedAt(completedAt: Long?): String {
+    if (completedAt == null) return ""
+    val timeOnly = SimpleDateFormat("HH:mm", Locale.CHINESE).format(Date(completedAt))
+    return when (getDaysDiffFromToday(completedAt)) {
+        0L -> "今天 $timeOnly"
+        -1L -> "昨天 $timeOnly"
+        else -> {
+            val nowYear = Calendar.getInstance().get(Calendar.YEAR)
+            val targetYear = Calendar.getInstance().apply { timeInMillis = completedAt }.get(Calendar.YEAR)
+            val pattern = if (targetYear == nowYear) "M月d日" else "yyyy年M月d日"
+            SimpleDateFormat(pattern, Locale.CHINESE).format(Date(completedAt))
+        }
+    }
+}
+
+/**
+ * 历史归属日期兜底：completedAt 优先（本策略上线前的存量已完成任务无此字段），
+ * 依次回退 startTime / endTime / createdAt，保证任何任务都能归入某个历史日期。
+ */
+fun historyAnchorMillis(task: com.cuon.app.data.local.TaskEntity): Long =
+    task.completedAt ?: task.startTime ?: task.endTime ?: task.createdAt
+
+/** 历史列表分组标题：今天 / 昨天 / M月d日 EEE（跨年带年份） */
+fun formatHistoryGroupLabel(anchorMillis: Long): String {
+    val diffDays = getDaysDiffFromToday(anchorMillis)
+    if (diffDays == 0L) return "今天"
+    if (diffDays == -1L) return "昨天"
+    val nowYear = Calendar.getInstance().get(Calendar.YEAR)
+    val targetYear = Calendar.getInstance().apply { timeInMillis = anchorMillis }.get(Calendar.YEAR)
+    val pattern = if (targetYear == nowYear) "M月d日 EEE" else "yyyy年M月d日 EEE"
+    return SimpleDateFormat(pattern, Locale.CHINESE).format(Date(anchorMillis))
+}
